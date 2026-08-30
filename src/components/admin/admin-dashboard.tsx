@@ -28,7 +28,8 @@ import toast from "react-hot-toast"
 import { NotificationsPanel } from "@/components/shared/notifications-panel"
 import { ChangePasswordCard } from "@/components/shared/change-password-card"
 import { UsersManagement } from "@/features/admin/users/users-management"
-import { plansService, productsService, promotionsService } from "@/services/api"
+import { configService, plansService, productsService, promotionsService } from "@/services/api"
+import { useAuth } from "@/contexts/AuthContext"
 
 interface AdminDashboardProps {
   userName: string
@@ -150,6 +151,7 @@ function PromoCard({
 }
 
 export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<TabType>("home")
   const [showNotifications, setShowNotifications] = useState(false)
   const [showCreatePlan, setShowCreatePlan] = useState(false)
@@ -164,6 +166,12 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
   const [promotionList, setPromotionList] = useState(initialPromotions)
   const [createPromoType, setCreatePromoType] = useState<PromoType | null>(null)
   const [newPromo, setNewPromo] = useState({ name: "", description: "", discount: "", validUntil: "" })
+  const [gymForm, setGymForm] = useState({ name: user?.gimnasioNombre ?? "", address: "" })
+  const [notificationSettings, setNotificationSettings] = useState({
+    notifNuevoPago: true,
+    notifAptoVencido: true,
+    notifNuevoCliente: true,
+  })
 
   // Productos / stock editable
   const [productList, setProductList] = useState<ProductRecord[]>(initialProducts)
@@ -380,6 +388,26 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
       toast.success("Estado de la promoción actualizado")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo cambiar el estado de la promoción")
+    }
+  }
+
+  const saveGymConfig = async () => {
+    if (!gymForm.name.trim()) {
+      toast.error("El nombre del gimnasio es obligatorio")
+      return
+    }
+
+    try {
+      await configService.updateGym({
+        nombre: gymForm.name.trim(),
+        direccion: gymForm.address.trim(),
+        notifNuevoPago: notificationSettings.notifNuevoPago ? 1 : 0,
+        notifAptoVencido: notificationSettings.notifAptoVencido ? 1 : 0,
+        notifNuevoCliente: notificationSettings.notifNuevoCliente ? 1 : 0,
+      })
+      toast.success("Configuración guardada correctamente")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar la configuración")
     }
   }
 
@@ -889,7 +917,8 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
                   <label className="text-sm font-medium text-foreground">Nombre del Gimnasio</label>
                   <input
                     type="text"
-                    defaultValue="FitLogic Gym"
+                    value={gymForm.name}
+                    onChange={(e) => setGymForm((prev) => ({ ...prev, name: e.target.value }))}
                     className="w-full px-4 py-3 bg-secondary border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
                   />
                 </div>
@@ -897,11 +926,12 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
                   <label className="text-sm font-medium text-foreground">Dirección</label>
                   <input
                     type="text"
-                    defaultValue="Av. Corrientes 1234, CABA"
+                    value={gymForm.address}
+                    onChange={(e) => setGymForm((prev) => ({ ...prev, address: e.target.value }))}
                     className="w-full px-4 py-3 bg-secondary border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
                   />
                 </div>
-                <button className="px-6 py-3 bg-primary text-primary-foreground rounded-xl font-semibold hover:bg-primary/90 transition-colors">
+                <button onClick={saveGymConfig} className="px-6 py-3 bg-primary text-primary-foreground rounded-xl font-semibold hover:bg-primary/90 transition-colors">
                   Guardar Cambios
                 </button>
               </div>
@@ -975,24 +1005,24 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
                 <h2 className="font-semibold text-foreground">Notificaciones</h2>
               </div>
               <div className="p-5 space-y-4">
-                <label className="flex items-center justify-between cursor-pointer">
+                <button type="button" onClick={() => setNotificationSettings((prev) => ({ ...prev, notifNuevoPago: !prev.notifNuevoPago }))} className="w-full flex items-center justify-between cursor-pointer text-left">
                   <span className="text-foreground">Notificar vencimiento de cuota (3 días antes)</span>
-                  <div className="w-12 h-6 bg-primary rounded-full relative">
-                    <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full" />
+                  <div className={`w-12 h-6 rounded-full relative transition-colors ${notificationSettings.notifNuevoPago ? "bg-primary" : "bg-muted"}`}>
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationSettings.notifNuevoPago ? "right-1" : "left-1"}`} />
                   </div>
-                </label>
-                <label className="flex items-center justify-between cursor-pointer">
+                </button>
+                <button type="button" onClick={() => setNotificationSettings((prev) => ({ ...prev, notifAptoVencido: !prev.notifAptoVencido }))} className="w-full flex items-center justify-between cursor-pointer text-left">
                   <span className="text-foreground">Notificar vencimiento de apto físico</span>
-                  <div className="w-12 h-6 bg-primary rounded-full relative">
-                    <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full" />
+                  <div className={`w-12 h-6 rounded-full relative transition-colors ${notificationSettings.notifAptoVencido ? "bg-primary" : "bg-muted"}`}>
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationSettings.notifAptoVencido ? "right-1" : "left-1"}`} />
                   </div>
-                </label>
-                <label className="flex items-center justify-between cursor-pointer">
+                </button>
+                <button type="button" onClick={() => setNotificationSettings((prev) => ({ ...prev, notifNuevoCliente: !prev.notifNuevoCliente }))} className="w-full flex items-center justify-between cursor-pointer text-left">
                   <span className="text-foreground">Notificar nuevos pagos al administrador</span>
-                  <div className="w-12 h-6 bg-primary rounded-full relative">
-                    <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full" />
+                  <div className={`w-12 h-6 rounded-full relative transition-colors ${notificationSettings.notifNuevoCliente ? "bg-primary" : "bg-muted"}`}>
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationSettings.notifNuevoCliente ? "right-1" : "left-1"}`} />
                   </div>
-                </label>
+                </button>
               </div>
             </div>
           </div>

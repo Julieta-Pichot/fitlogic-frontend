@@ -107,6 +107,16 @@ export const configService = {
     const response = await api.get<ApiResponse<SystemConfig>>('/config/system');
     return response.data;
   },
+  updateGym: async (payload: {
+    nombre: string;
+    direccion: string;
+    notifNuevoPago: 0 | 1;
+    notifAptoVencido: 0 | 1;
+    notifNuevoCliente: 0 | 1;
+  }) => {
+    const response = await api.put<ApiResponse>('/config/gym', payload);
+    return response.data;
+  },
 };
 
 export const plansService = {
