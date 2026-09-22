@@ -1,5 +1,7 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Calendar, Clock, MapPin, Users, Star, ChevronLeft, ChevronRight, X, Check } from "lucide-react"
+import { classesService, type ClassRecord } from "@/services/classes.service"
+import toast from "react-hot-toast"
 
 const classes = [
   {
@@ -88,24 +90,69 @@ const classes = [
   },
 ]
 
+const mapClass = (item: ClassRecord) => {
+  const enrolled = item.inscripciones.some((entry) => entry.estadoInscripcion.nombre === "INSCRIPTO" || entry.estadoInscripcion.nombre === "ASISTIO")
+  const finished = new Date(item.fechaHora) <= new Date()
+  const enrolledCount = item.inscripciones.filter((entry) => entry.estadoInscripcion.nombre !== "CANCELADO").length
+  return {
+    id: item.id,
+    name: item.nombre,
+    instructor: `${item.profesor.usuario.nombre} ${item.profesor.usuario.apellido}`.trim(),
+    time: new Date(item.fechaHora).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }),
+    room: item.sala ?? "Sala única",
+    spots: Math.max(0, item.cupoMaximo - enrolledCount),
+    maxSpots: item.cupoMaximo,
+    enrolled,
+    isRecurring: item.recurrente,
+    rating: item.puntuaciones.length ? item.puntuaciones.reduce((sum, rating) => sum + rating.puntuacion, 0) / item.puntuaciones.length : null,
+    finished,
+    day: new Date(item.fechaHora).toLocaleDateString("es-AR", { weekday: "long" }).toLowerCase(),
+  }
+}
+
 export function ClientClasses() {
   const [view, setView] = useState<"available" | "enrolled">("available")
   const [selectedClass, setSelectedClass] = useState<typeof classes[0] | null>(null)
+  const [classList, setClassList] = useState<typeof classes>([])
   const [cancelledIds, setCancelledIds] = useState<number[]>([])
   const [ratedClasses, setRatedClasses] = useState<Record<number, number>>({})
   const [ratingClass, setRatingClass] = useState<typeof classes[0] | null>(null)
   const [ratingValue, setRatingValue] = useState(0)
 
-  const myClasses = classes.filter((c) => c.enrolled && !cancelledIds.includes(c.id))
+  useEffect(() => {
+    classesService.listAvailable().then((items) => {
+      setClassList(items.map(mapClass))
+      setRatedClasses(Object.fromEntries(items.flatMap((item) => item.puntuaciones.map((rating) => [item.id, rating.puntuacion]))))
+    }).catch(() => toast.error("No se pudieron cargar las clases"))
+  }, [])
+
+  const myClasses = classList.filter((c) => c.enrolled)
+
+  const enrollClass = async (id: number) => {
+    try {
+      await classesService.enroll(id)
+      setClassList((prev) => prev.map((item) => item.id === id ? { ...item, enrolled: true, spots: Math.max(0, item.spots - 1) } : item))
+      setSelectedClass(null)
+      toast.success("Inscripción creada correctamente")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo realizar la inscripción")
+    }
+  }
 
   const cancelEnrollment = (id: number) => {
     setCancelledIds((prev) => [...prev, id])
     setSelectedClass(null)
   }
 
-  const submitRating = () => {
+  const submitRating = async () => {
     if (ratingClass && ratingValue > 0) {
-      setRatedClasses((prev) => ({ ...prev, [ratingClass.id]: ratingValue }))
+      try {
+        await classesService.rate(ratingClass.id, ratingValue)
+        setRatedClasses((prev) => ({ ...prev, [ratingClass.id]: ratingValue }))
+        toast.success("Puntuación guardada")
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "No se pudo puntuar la clase")
+      }
     }
     setRatingClass(null)
     setRatingValue(0)
@@ -179,7 +226,7 @@ export function ClientClasses() {
                   >
                     {10 + index}
                   </div>
-                  {classes.filter((c) => c.day === day).length > 0 && (
+                  {classList.filter((c) => c.day === day).length > 0 && (
                     <div className="flex justify-center gap-0.5 mt-1">
                       {classes
                         .filter((c) => c.day === day)
@@ -196,10 +243,10 @@ export function ClientClasses() {
 
           {/* Classes List */}
           <div className="space-y-3">
-            {classes.map((classItem) => (
+            {classList.map((classItem) => (
               <div
                 key={classItem.id}
-                onClick={() => setSelectedClass(classItem)}
+                      onClick={() => enrollClass(classItem.id)}
                 className="bg-card border border-border rounded-2xl p-4 cursor-pointer hover:border-primary/50 transition-all"
               >
                 <div className="flex items-start justify-between">
@@ -308,7 +355,7 @@ export function ClientClasses() {
                     )
                   ) : (
                     <button
-                      onClick={() => cancelEnrollment(classItem.id)}
+                      onClick={() => setSelectedClass(null)}
                       className="flex-1 py-2.5 bg-red-500/10 text-red-500 rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm hover:bg-red-500/20 transition-colors"
                     >
                       <X className="w-4 h-4" />

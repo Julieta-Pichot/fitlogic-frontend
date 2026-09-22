@@ -8,12 +8,14 @@ interface ConfigContextValue {
 }
 
 const emptyConfig: SystemConfig = {
+  gimnasio: null,
   roles: [],
   estadosCliente: [],
   estadosCuota: [],
-  metodosPago: {},
-  estadosPago: {},
-  roleIds: {},
+  metodosPago: [],
+  estadosInscripcion: [],
+  categoriasReceta: [],
+  tiposNotificacion: [],
 };
 
 const ConfigContext = createContext<ConfigContextValue | null>(null);

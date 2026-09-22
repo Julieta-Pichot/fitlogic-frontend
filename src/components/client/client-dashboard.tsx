@@ -4,7 +4,6 @@ import {
   Dumbbell,
   Calendar,
   UtensilsCrossed,
-  ShoppingBag,
   Bell,
   Flame,
   ChevronRight,
@@ -14,7 +13,6 @@ import {
 import { ClientRoutines } from "./client-routines"
 import { ClientClasses } from "./client-classes"
 import { ClientRecipes } from "./client-recipes"
-import { ClientStore } from "./client-store"
 import { ClientProfile } from "./client-profile"
 import { NotificationsPanel } from "@/components/shared/notifications-panel"
 
@@ -23,7 +21,7 @@ interface ClientDashboardProps {
   onLogout: () => void
 }
 
-type TabType = "home" | "rutinas" | "clases" | "recetas" | "tienda" | "perfil"
+type TabType = "home" | "rutinas" | "clases" | "recetas" | "perfil"
 
 export function ClientDashboard({ userName, onLogout }: ClientDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>("home")
@@ -37,8 +35,6 @@ export function ClientDashboard({ userName, onLogout }: ClientDashboardProps) {
         return <ClientClasses />
       case "recetas":
         return <ClientRecipes />
-      case "tienda":
-        return <ClientStore />
       case "perfil":
         return <ClientProfile userName={userName} onLogout={onLogout} />
       default:
@@ -88,7 +84,6 @@ export function ClientDashboard({ userName, onLogout }: ClientDashboardProps) {
             { id: "rutinas", icon: Dumbbell, label: "Rutinas" },
             { id: "clases", icon: Calendar, label: "Clases" },
             { id: "recetas", icon: UtensilsCrossed, label: "Recetas" },
-            { id: "tienda", icon: ShoppingBag, label: "Tienda" },
           ].map((tab) => (
             <button
               key={tab.id}

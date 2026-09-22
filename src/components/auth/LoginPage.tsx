@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, Dumbbell, Eye, EyeOff, Lock, Mail } from 'lucide-react';
+import { Dumbbell, Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -10,7 +10,6 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [gymCode, setGymCode] = useState('FIT001');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -20,7 +19,6 @@ export function LoginPage() {
     setIsSubmitting(true);
 
     const result = await login({
-      codigoGimnasio: gymCode.trim(),
       email: email.trim(),
       password,
     });
@@ -90,21 +88,7 @@ export function LoginPage() {
             )}
 
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Código del Gimnasio</label>
-              <div className="relative">
-                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                <input
-                  type="text"
-                  value={gymCode}
-                  onChange={(e) => setGymCode(e.target.value)}
-                  placeholder="FIT001"
-                  className="w-full pl-11 pr-4 py-3 bg-secondary border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-foreground placeholder:text-muted-foreground transition-all"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Email o Celular</label>
+              <label className="text-sm font-medium text-foreground">Email</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                 <input

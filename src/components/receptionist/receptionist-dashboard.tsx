@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Home,
   Users,
@@ -16,7 +16,6 @@ import {
   AlertTriangle,
   Clock,
   DollarSign,
-  ShoppingBag,
   Upload,
   Wifi,
   Edit,
@@ -27,13 +26,15 @@ import {
 } from "lucide-react"
 import { NotificationsPanel } from "@/components/shared/notifications-panel"
 import { ChangePasswordCard } from "@/components/shared/change-password-card"
+import { clientsService, type ClientApiRecord } from "@/services/clients.service"
+import { attendanceService } from "@/services/attendance.service"
 
 interface ReceptionistDashboardProps {
   userName: string
   onLogout: () => void
 }
 
-type TabType = "home" | "clientes" | "pagos" | "tienda" | "asistencia" | "configuracion" | "perfil"
+type TabType = "home" | "clientes" | "pagos" | "asistencia" | "configuracion" | "perfil"
 
 type ClientStatus = "active" | "pending_payment" | "inactive"
 
@@ -50,56 +51,26 @@ type ClientRecord = {
   aptoExpires: string
 }
 
-const initialClients: ClientRecord[] = [
-  {
-    id: 1,
-    name: "María García",
-    email: "maria@email.com",
-    phone: "+54 11 1234-5678",
-    plan: "Mensual",
-    status: "active",
-    cuota: "Activa",
-    cuotaExpires: "28/03/2026",
-    aptoFisico: "Activo",
-    aptoExpires: "15/12/2026",
-  },
-  {
-    id: 2,
-    name: "Juan Pérez",
-    email: "juan@email.com",
-    phone: "+54 11 2345-6789",
-    plan: "Trimestral",
-    status: "pending_payment",
-    cuota: "Vencida",
-    cuotaExpires: "01/03/2026",
-    aptoFisico: "Activo",
-    aptoExpires: "20/08/2026",
-  },
-  {
-    id: 3,
-    name: "Laura Sánchez",
-    email: "laura@email.com",
-    phone: "+54 11 3456-7890",
-    plan: "Mensual",
-    status: "active",
-    cuota: "Activa",
-    cuotaExpires: "22/03/2026",
-    aptoFisico: "Pendiente",
-    aptoExpires: "-",
-  },
-  {
-    id: 4,
-    name: "Carlos Ruiz",
-    email: "carlos@email.com",
-    phone: "+54 11 4567-8901",
-    plan: "Mensual",
-    status: "inactive",
-    cuota: "Vencida",
-    cuotaExpires: "10/01/2026",
-    aptoFisico: "Vencido",
-    aptoExpires: "01/02/2026",
-  },
-]
+const initialClients: ClientRecord[] = []
+
+const mapClient = (client: ClientApiRecord): ClientRecord => {
+  const latestQuota = client.cuotas[0]
+  const clientStatus = client.estadoCliente.nombre === "HABILITADO" ? "active" : client.estadoCliente.nombre === "INHABILITADO_PAGO" ? "pending_payment" : "inactive"
+  const quotaStatus = latestQuota?.estadoCuota.nombre === "ACTIVA" ? "Activa" : latestQuota?.estadoCuota.nombre === "VENCIDA" ? "Vencida" : "Pendiente"
+  const clearanceActive = client.aptoFisicoFechaVencimiento && new Date(client.aptoFisicoFechaVencimiento) >= new Date()
+  return {
+    id: client.id,
+    name: `${client.usuario.nombre} ${client.usuario.apellido}`.trim(),
+    email: client.usuario.email,
+    phone: client.usuario.telefono ?? "",
+    plan: latestQuota?.plan.nombre ?? "Sin plan",
+    status: clientStatus,
+    cuota: quotaStatus,
+    cuotaExpires: latestQuota?.fechaVencimiento ? new Date(latestQuota.fechaVencimiento).toLocaleDateString("es-AR") : "-",
+    aptoFisico: clearanceActive ? "Activo" : client.aptoFisicoArchivo ? "Vencido" : "Pendiente",
+    aptoExpires: client.aptoFisicoFechaVencimiento ? new Date(client.aptoFisicoFechaVencimiento).toLocaleDateString("es-AR") : "-",
+  }
+}
 
 const storeProducts = [
   { id: 1, name: "Whey Protein Gold", category: "Proteínas", price: 45000, stock: 15 },
@@ -116,13 +87,7 @@ const initialPayments = [
   { id: 3, client: "Pedro Gómez", amount: 40000, date: "09/03/2026", method: "Transferencia" },
 ]
 
-const todayAttendance = [
-  { id: 1, name: "María García", time: "08:15" },
-  { id: 2, name: "Carlos Ruiz", time: "08:30" },
-  { id: 3, name: "Ana López", time: "09:00" },
-  { id: 4, name: "Pedro Gómez", time: "09:45" },
-  { id: 5, name: "Lucía Fernández", time: "10:20" },
-]
+const todayAttendance: { id: number; name: string; time: string }[] = []
 
 const getFormattedHour = () =>
   new Date().toLocaleTimeString("es-AR", {
@@ -142,8 +107,21 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
     name: "",
     email: "",
     phone: "",
+    password: "",
     plan: "Mensual",
   })
+
+  useEffect(() => {
+    clientsService.list().then((clients) => setClientList(clients.map(mapClient))).catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    attendanceService.list().then((items) => setAttendanceList(items.map((item) => ({
+      id: item.id,
+      name: `${item.cliente.usuario.nombre} ${item.cliente.usuario.apellido}`.trim(),
+      time: new Date(item.fechaHora).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }),
+    })))).catch(() => undefined)
+  }, [])
 
   // Stock de productos editable y registro de ventas
   const [productList, setProductList] = useState(storeProducts)
@@ -252,7 +230,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
     return { allowed: true, reason: "Acceso autorizado" }
   }
 
-  const handleRegisterAttendance = (manualClient?: string) => {
+  const handleRegisterAttendance = async (manualClient?: string) => {
     const clientName = (manualClient ?? attendanceForm.client).trim()
 
     if (!clientName) {
@@ -263,29 +241,28 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
       (client) => client.name.toLowerCase() === clientName.toLowerCase(),
     )
 
-    if (matchedClient) {
-      const { allowed, reason } = getAccessEligibility(matchedClient)
-      if (!allowed) {
-        setScanStatus(`Acceso denegado para ${matchedClient.name}: ${reason}`)
-        return
-      }
+    if (!matchedClient) {
+      setScanStatus(`Cliente no encontrado: ${clientName}`)
+      return
     }
 
-    setAttendanceList((prev) => {
-      const alreadyPresent = prev.some((entry) => entry.name.toLowerCase() === clientName.toLowerCase())
-      if (alreadyPresent) {
-        return prev
-      }
+    const { allowed, reason } = getAccessEligibility(matchedClient)
+    if (!allowed) {
+      setScanStatus(`Acceso denegado para ${matchedClient.name}: ${reason}`)
+      return
+    }
 
-      return [
-        {
-          id: Date.now(),
-          name: clientName,
-          time: getFormattedHour(),
-        },
-        ...prev,
-      ]
-    })
+    try {
+      const attendance = await attendanceService.register(matchedClient.id)
+      setAttendanceList((prev) => [{
+        id: attendance.id,
+        name: matchedClient.name,
+        time: new Date(attendance.fechaHora).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }),
+      }, ...prev])
+    } catch (error) {
+      setScanStatus(error instanceof Error ? error.message : "No se pudo registrar la asistencia")
+      return
+    }
 
     setAttendanceForm({ client: "" })
     setScanStatus(`Ingreso registrado: ${clientName}`)
@@ -360,30 +337,26 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
     return matchesSearch && matchesStatus
   })
 
-  const handleCreateClient = () => {
+  const handleCreateClient = async () => {
     const name = newClientForm.name.trim()
     const email = newClientForm.email.trim()
     const phone = newClientForm.phone.trim()
+    const password = newClientForm.password.trim()
 
-    if (!name || !email || !phone) {
+    if (!name || !email || !phone || password.length < 6) {
       return
     }
 
-    const newClient: ClientRecord = {
-      id: Date.now(),
-      name,
+    const [nombre, ...apellidoParts] = name.split(/\s+/)
+    const created = await clientsService.create({
+      nombre,
+      apellido: apellidoParts.join(" ") || nombre,
       email,
-      phone,
-      plan: newClientForm.plan,
-      status: "active",
-      cuota: "Activa",
-      cuotaExpires: "30/04/2026",
-      aptoFisico: "Pendiente",
-      aptoExpires: "-",
-    }
-
-    setClientList((prev) => [newClient, ...prev])
-    setNewClientForm({ name: "", email: "", phone: "", plan: "Mensual" })
+      password,
+      telefono: phone,
+    })
+    setClientList((prev) => [mapClient(created), ...prev])
+    setNewClientForm({ name: "", email: "", phone: "", password: "", plan: "Mensual" })
     setShowNewClient(false)
     setActiveTab("clientes")
   }
@@ -422,7 +395,6 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
             { id: "home", icon: Home, label: "Inicio" },
             { id: "clientes", icon: Users, label: "Clientes" },
             { id: "pagos", icon: CreditCard, label: "Pagos" },
-            { id: "tienda", icon: ShoppingBag, label: "Tienda" },
             { id: "asistencia", icon: ClipboardCheck, label: "Asistencia" },
             { id: "configuracion", icon: Settings, label: "Configuración" },
           ].map((item) => (
@@ -541,11 +513,11 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                 <span className="font-semibold">Nuevo Cliente</span>
               </button>
               <button
-                onClick={() => setActiveTab("tienda")}
+                onClick={() => setActiveTab("asistencia")}
                 className="bg-card border border-border rounded-2xl p-4 flex items-center gap-3 hover:border-primary/50 transition-colors"
               >
-                <ShoppingBag className="w-6 h-6 text-primary" />
-                <span className="font-semibold text-foreground">Ver Tienda</span>
+                <ClipboardCheck className="w-6 h-6 text-primary" />
+                <span className="font-semibold text-foreground">Ver Asistencias</span>
               </button>
             </div>
 
@@ -1096,7 +1068,6 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
             { id: "home", icon: Home, label: "Inicio" },
             { id: "clientes", icon: Users, label: "Clientes" },
             { id: "pagos", icon: CreditCard, label: "Pagos" },
-            { id: "tienda", icon: ShoppingBag, label: "Tienda" },
             { id: "asistencia", icon: ClipboardCheck, label: "Asist." },
             { id: "configuracion", icon: Settings, label: "Config" },
           ].map((tab) => (
@@ -1164,16 +1135,14 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Plan</label>
-                <select
-                  value={newClientForm.plan}
-                  onChange={(e) => setNewClientForm((prev) => ({ ...prev, plan: e.target.value }))}
-                  className="w-full px-4 py-3 bg-secondary border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
-                >
-                  <option value="Mensual">Mensual - $15,000</option>
-                  <option value="Trimestral">Trimestral - $40,000</option>
-                  <option value="Anual">Anual - $120,000</option>
-                </select>
+                <label className="text-sm font-medium text-foreground">Contraseña inicial</label>
+                <input
+                  type="password"
+                  value={newClientForm.password}
+                  onChange={(e) => setNewClientForm((prev) => ({ ...prev, password: e.target.value }))}
+                  placeholder="Mínimo 6 caracteres"
+                  className="w-full px-4 py-3 bg-secondary border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground"
+                />
               </div>
               <button
                 onClick={handleCreateClient}

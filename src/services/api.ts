@@ -108,14 +108,36 @@ export const configService = {
     return response.data;
   },
   updateGym: async (payload: {
-    nombre: string;
-    direccion: string;
-    notifNuevoPago: 0 | 1;
-    notifAptoVencido: 0 | 1;
-    notifNuevoCliente: 0 | 1;
+    nombre?: string;
+    direccion?: string;
+    telefono?: string;
+    emailSoporte?: string;
+    identidadVisual?: string;
   }) => {
     const response = await api.put<ApiResponse>('/config/gym', payload);
     return response.data;
+  },
+};
+
+export type DashboardStats = {
+  clientesActivos: number;
+  ingresosDelMes: number;
+  planesActivos: number;
+  clasesEstaSemana: number;
+  ingresosMensuales: Array<{
+    year: number;
+    month: number;
+    label: string;
+    total: number;
+  }>;
+};
+
+export const dashboardService = {
+  getStats: async (months: 6 | 12 = 6) => {
+    const response = await api.get<ApiResponse<DashboardStats>>('/admin/dashboard/stats', {
+      params: { months },
+    });
+    return response.data.data;
   },
 };
 
@@ -171,13 +193,13 @@ export const promotionsService = {
     return response.data.data ?? [];
   },
   create: async (payload: {
+    planId: number;
     nombre: string;
     descripcion?: string;
-    descuentoPorcentaje: number;
-    tipo: 1 | 2;
+    descuento: number;
     fechaInicio?: string;
     fechaFin?: string;
-    activo?: 0 | 1;
+    activa?: 0 | 1;
   }) => {
     const response = await api.post<ApiResponse>('/promotions', payload);
     return response.data;
@@ -185,11 +207,11 @@ export const promotionsService = {
   update: async (id: number, payload: Partial<{
     nombre: string;
     descripcion: string;
-    descuentoPorcentaje: number;
-    tipo: 1 | 2;
+    planId: number;
+    descuento: number;
     fechaInicio: string;
     fechaFin: string;
-    activo: 0 | 1;
+    activa: 0 | 1;
   }>) => {
     const response = await api.patch<ApiResponse>(`/promotions/${id}`, payload);
     return response.data;

@@ -25,6 +25,9 @@ import {
 } from "lucide-react"
 import { NotificationsPanel } from "@/components/shared/notifications-panel"
 import { ChangePasswordCard } from "@/components/shared/change-password-card"
+import { clientsService, type ClientApiRecord } from "@/services/clients.service"
+import { routinesService, type ExerciseRecord } from "@/services/routines.service"
+import toast from "react-hot-toast"
 
 interface TrainerDashboardProps {
   userName: string
@@ -294,6 +297,28 @@ export function TrainerDashboard({ userName, userId, onLogout }: TrainerDashboar
   // Categoría de la rutina y grupos musculares (solo aplica a Fuerza). Se puede elegir 1 o más en el mismo día.
   const [routineCategory, setRoutineCategory] = useState("Fuerza")
   const [routineMuscles, setRoutineMuscles] = useState<string[]>(["Pecho"])
+  const [routineDays, setRoutineDays] = useState<number[]>([1])
+  const [exerciseIds, setExerciseIds] = useState<Record<string, number>>({})
+
+  useEffect(() => {
+    Promise.all([clientsService.list(), routinesService.listExercises()]).then(([clients, exercises]) => {
+      const mappedStudents = clients.map((client: ClientApiRecord) => ({
+        id: client.id,
+        name: `${client.usuario.nombre} ${client.usuario.apellido}`.trim(),
+        lastRoutine: "Sin rutina",
+        plan: client.objetivoEntrenamiento ?? "Sin objetivo",
+        isNew: false,
+        aptoFisico: client.aptoFisicoArchivo ? "Cargado" : "Pendiente",
+        aptoExpires: client.aptoFisicoFechaVencimiento ? new Date(client.aptoFisicoFechaVencimiento).toLocaleDateString("es-AR") : "-",
+        condicion: client.objetivoEntrenamiento ?? "Sin observaciones",
+        phone: client.usuario.telefono ?? "",
+      }))
+      if (mappedStudents.length) setMyStudents(mappedStudents)
+      const ids = Object.fromEntries(exercises.map((exercise: ExerciseRecord) => [exercise.nombre, exercise.id]))
+      setExerciseIds(ids)
+      setExerciseCatalog(exercises.map((exercise: ExerciseRecord) => exercise.nombre))
+    }).catch(() => toast.error("No se pudieron cargar los datos del profesor"))
+  }, [])
 
   useEffect(() => {
     setMyStudents((prev) => {
@@ -349,11 +374,17 @@ export function TrainerDashboard({ userName, userId, onLogout }: TrainerDashboar
     )
   }
 
-  const addCustomExercise = () => {
+  const addCustomExercise = async () => {
     const name = newExerciseName.trim()
     if (!name) return
-    // Si no existe en el catálogo, lo agregamos
-    setExerciseCatalog((prev) => (prev.some((e) => e.toLowerCase() === name.toLowerCase()) ? prev : [name, ...prev]))
+    try {
+      const exercise = await routinesService.createExercise(name)
+      setExerciseIds((prev) => ({ ...prev, [exercise.nombre]: exercise.id }))
+      setExerciseCatalog((prev) => (prev.some((e) => e.toLowerCase() === name.toLowerCase()) ? prev : [name, ...prev]))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo crear el ejercicio")
+      return
+    }
     // Y lo dejamos seleccionado en la rutina actual
     setSelectedExercises((prev) =>
       prev.some((e) => e.name.toLowerCase() === name.toLowerCase())
@@ -391,22 +422,38 @@ export function TrainerDashboard({ userName, userId, onLogout }: TrainerDashboar
     ? myStudents.filter((s) => s.name.toLowerCase().includes(homeSearch.toLowerCase()))
     : []
 
-  const handleCreateRoutine = () => {
+  const handleCreateRoutine = async () => {
     const student = myStudents.find((item) => item.name.toLowerCase() === routineStudentName.trim().toLowerCase())
 
     if (!student || selectedExercises.length === 0) {
       return
     }
 
-    setRoutineAssignments((prev) => ({
-      ...prev,
-      [student.name]: {
-        objective: routineCategory,
-        progress: 78,
-        lastUpdated: "Hoy",
-        exercises: selectedExercises.length,
-      },
-    }))
+    const exercises = selectedExercises.map((exercise) => ({
+      ejercicioId: exerciseIds[exercise.name],
+      series: Number(exercise.sets),
+      repeticiones: Number(exercise.reps),
+    })).filter((exercise) => exercise.ejercicioId)
+    if (!exercises.length || !routineDays.length) {
+      toast.error("Seleccioná días y ejercicios válidos")
+      return
+    }
+
+    try {
+      await routinesService.create({
+        clienteId: student.id,
+        nombre: routineCategory,
+        descripcion: routineNotes,
+        objetivo: routineCategory,
+        diasSemana: routineDays,
+        ejercicios,
+      })
+      setRoutineAssignments((prev) => ({ ...prev, [student.name]: { objective: routineCategory, progress: 0, lastUpdated: "Hoy", exercises: exercises.length } }))
+      toast.success("Rutina guardada correctamente")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo crear la rutina")
+      return
+    }
 
     const nextStudent = { ...student, lastRoutine: "Hoy" }
     setSelectedStudent(nextStudent)
@@ -949,7 +996,12 @@ export function TrainerDashboard({ userName, userId, onLogout }: TrainerDashboar
                   {["L", "M", "X", "J", "V", "S", "D"].map((day) => (
                     <button
                       key={day}
-                      className="w-10 h-10 rounded-xl bg-secondary text-foreground hover:bg-primary hover:text-primary-foreground transition-colors font-medium"
+                      type="button"
+                      onClick={() => {
+                        const dayIndex = ["L", "M", "X", "J", "V", "S", "D"].indexOf(day) + 1
+                        setRoutineDays((prev) => prev.includes(dayIndex) ? prev.filter((item) => item !== dayIndex) : [...prev, dayIndex])
+                      }}
+                      className={`w-10 h-10 rounded-xl transition-colors font-medium ${routineDays.includes(["L", "M", "X", "J", "V", "S", "D"].indexOf(day) + 1) ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground hover:bg-primary hover:text-primary-foreground"}`}
                     >
                       {day}
                     </button>

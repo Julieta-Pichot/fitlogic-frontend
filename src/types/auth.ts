@@ -29,7 +29,6 @@ export interface AuthUser {
 }
 
 export interface LoginPayload {
-  codigoGimnasio: string;
   email: string;
   password: string;
 }
@@ -51,10 +50,19 @@ export interface ChangePasswordPayload {
 }
 
 export interface SystemConfig {
+  gimnasio: {
+    id: number;
+    nombre: string;
+    direccion: string | null;
+    telefono: string | null;
+    emailSoporte: string | null;
+    identidadVisual: string | null;
+  } | null;
   roles: Array<{ id: number; nombre: string }>;
   estadosCliente: Array<{ id: number; nombre: string | null }>;
   estadosCuota: Array<{ id: number; nombre: string | null }>;
-  metodosPago: Record<string, number>;
-  estadosPago: Record<string, number>;
-  roleIds: Record<string, number>;
+  metodosPago: Array<{ id: number; nombre: string }>;
+  estadosInscripcion: Array<{ id: number; nombre: string }>;
+  categoriasReceta: Array<{ id: number; nombre: string }>;
+  tiposNotificacion: Array<{ id: number; nombre: string }>;
 }
