@@ -8,8 +8,8 @@ export type AttendanceApiRecord = {
 };
 
 export const attendanceService = {
-  list: async () => {
-    const response = await api.get<{ data: AttendanceApiRecord[] }>('/attendance');
+  list: async (params?: { desde?: string; hasta?: string }) => {
+    const response = await api.get<{ data: AttendanceApiRecord[] }>('/attendance', { params });
     return response.data.data ?? [];
   },
   register: async (clienteId: number) => {

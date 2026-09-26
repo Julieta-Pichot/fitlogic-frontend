@@ -18,6 +18,7 @@ interface AuthContextValue {
   login: (payload: LoginPayload) => Promise<LoginResult>;
   logout: () => void;
   refreshUser: () => Promise<void>;
+  updateUser: (user: AuthUser) => void;
   roleKey: UserRole | null;
   displayName: string;
 }
@@ -86,6 +87,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [logout]);
 
+  // Reemplaza el usuario en memoria sin pasar por `loading` (refreshUser desmontaría la pantalla).
+  const updateUser = useCallback((nextUser: AuthUser) => setUser(nextUser), []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -94,10 +98,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       refreshUser,
+      updateUser,
       roleKey: user?.roleKey ?? null,
       displayName: user ? `${user.nombre} ${user.apellido}`.trim() : '',
     }),
-    [user, loading, login, logout, refreshUser]
+    [user, loading, login, logout, refreshUser, updateUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
