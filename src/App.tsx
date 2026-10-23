@@ -85,8 +85,8 @@ function ClienteHomePage() {
 }
 
 function ProfesorHomePage() {
-  const { displayName, user, logout } = useAuth();
-  return <TrainerDashboard userName={displayName} userId={user?.id} onLogout={logout} />;
+  const { displayName, logout } = useAuth();
+  return <TrainerDashboard userName={displayName} onLogout={logout} />;
 }
 
 function RecepcionistaHomePage() {

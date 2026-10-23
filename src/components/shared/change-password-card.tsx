@@ -4,7 +4,13 @@ import toast from 'react-hot-toast';
 import { authService } from '@/services/api';
 import { getErrorMessage } from '@/utils/get-error-message';
 
-export function ChangePasswordCard() {
+interface ChangePasswordCardProps {
+  minLength?: number;
+  // Permite usar otro endpoint (por defecto: /auth/change-password).
+  submit?: (payload: { currentPassword: string; newPassword: string }) => Promise<{ message?: string }>;
+}
+
+export function ChangePasswordCard({ minLength = 6, submit = authService.changePassword }: ChangePasswordCardProps = {}) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -21,8 +27,8 @@ export function ChangePasswordCard() {
       return;
     }
 
-    if (newPassword.length < 6) {
-      setError('La nueva contraseña debe tener al menos 6 caracteres.');
+    if (newPassword.length < minLength) {
+      setError(`La nueva contraseña debe tener al menos ${minLength} caracteres.`);
       return;
     }
 
@@ -31,10 +37,15 @@ export function ChangePasswordCard() {
       return;
     }
 
+    if (newPassword === currentPassword) {
+      setError('La nueva contraseña no puede ser igual a la actual.');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const response = await authService.changePassword({
+      const response = await submit({
         currentPassword,
         newPassword,
       });
@@ -92,7 +103,7 @@ export function ChangePasswordCard() {
               type={showNew ? 'text' : 'password'}
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
-              placeholder="Mínimo 6 caracteres"
+              placeholder={`Mínimo ${minLength} caracteres`}
               className="w-full rounded-xl border border-border bg-secondary px-4 py-3 pr-11 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <button

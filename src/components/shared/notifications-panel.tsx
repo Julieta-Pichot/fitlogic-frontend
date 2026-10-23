@@ -14,10 +14,21 @@ export interface NotificationItem {
   bgColor: string
 }
 
+export type NotificationsFilter = "all" | "unread"
+
 interface NotificationsPanelProps {
   isOpen: boolean
   onClose: () => void
   notifications?: NotificationItem[]
+  // Modo "servidor": el filtro lo resuelve el backend, por eso lo controla el padre.
+  filter?: NotificationsFilter
+  onFilterChange?: (filter: NotificationsFilter) => void
+  onItemClick?: (id: number) => void
+  onMarkAllRead?: () => void
+  markingAll?: boolean
+  loading?: boolean
+  error?: string | null
+  onRetry?: () => void
 }
 
 const defaultNotifications: NotificationItem[] = [
@@ -78,13 +89,29 @@ const defaultNotifications: NotificationItem[] = [
   },
 ]
 
-export function NotificationsPanel({ isOpen, onClose, notifications }: NotificationsPanelProps) {
+export function NotificationsPanel({
+  isOpen,
+  onClose,
+  notifications,
+  filter: controlledFilter,
+  onFilterChange,
+  onItemClick,
+  onMarkAllRead,
+  markingAll = false,
+  loading = false,
+  error = null,
+  onRetry,
+}: NotificationsPanelProps) {
   const items = notifications ?? defaultNotifications
-  const [filter, setFilter] = useState<"all" | "unread">("all")
+  const [localFilter, setLocalFilter] = useState<NotificationsFilter>("all")
+  const serverFiltered = Boolean(onFilterChange)
+  const filter = controlledFilter ?? localFilter
+  const setFilter = onFilterChange ?? setLocalFilter
 
   if (!isOpen) return null
 
-  const visibleItems = filter === "unread" ? items.filter((n) => !n.read) : items
+  const visibleItems = !serverFiltered && filter === "unread" ? items.filter((n) => !n.read) : items
+  const hasUnread = items.some((n) => !n.read)
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50">
@@ -126,13 +153,35 @@ export function NotificationsPanel({ isOpen, onClose, notifications }: Notificat
         </div>
 
         <div className="overflow-y-auto h-[calc(100%-140px)]">
-          {visibleItems.length === 0 ? (
-            <p className="p-6 text-sm text-muted-foreground text-center">No hay notificaciones</p>
+          {loading && items.length === 0 ? (
+            <p className="p-6 text-sm text-muted-foreground text-center">Cargando notificaciones...</p>
+          ) : error ? (
+            <div className="p-6 text-center space-y-3">
+              <p className="text-sm text-red-500">{error}</p>
+              {onRetry && (
+                <button onClick={onRetry} className="text-sm font-medium text-primary hover:underline">
+                  Reintentar
+                </button>
+              )}
+            </div>
+          ) : visibleItems.length === 0 ? (
+            <p className="p-6 text-sm text-muted-foreground text-center">
+              {filter === "unread" ? "No tenés notificaciones sin leer" : "No hay notificaciones"}
+            </p>
           ) : (
             visibleItems.map((notification) => (
               <div
                 key={notification.id}
-                className={`p-4 border-b border-border hover:bg-secondary/50 transition-colors cursor-pointer ${
+                role={onItemClick ? "button" : undefined}
+                tabIndex={onItemClick ? 0 : undefined}
+                onClick={() => onItemClick?.(notification.id)}
+                onKeyDown={(event) => {
+                  if (onItemClick && (event.key === "Enter" || event.key === " ")) {
+                    event.preventDefault()
+                    onItemClick(notification.id)
+                  }
+                }}
+                className={`p-4 border-b border-border hover:bg-secondary/50 transition-colors cursor-pointer focus:outline-none focus-visible:bg-secondary/50 ${
                   !notification.read ? "bg-secondary/30" : ""
                 }`}
               >
@@ -161,8 +210,12 @@ export function NotificationsPanel({ isOpen, onClose, notifications }: Notificat
         </div>
 
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border bg-card">
-          <button className="w-full py-2 text-primary text-sm font-medium hover:bg-primary/10 rounded-lg transition-colors">
-            Marcar todas como leídas
+          <button
+            onClick={onMarkAllRead}
+            disabled={markingAll || (Boolean(onMarkAllRead) && !hasUnread)}
+            className="w-full py-2 text-primary text-sm font-medium hover:bg-primary/10 rounded-lg transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
+          >
+            {markingAll ? "Marcando..." : "Marcar todas como leídas"}
           </button>
         </div>
       </div>
