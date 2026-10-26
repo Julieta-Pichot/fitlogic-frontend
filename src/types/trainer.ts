@@ -138,6 +138,11 @@ export interface TrainerRecipe {
   descripcion: string | null;
   categoria: RecipeCategory;
   calorias: number | null;
+  proteinasG: number | null;
+  carbohidratosG: number | null;
+  grasasG: number | null;
+  porciones: number | null;
+  otroDatoNutricional: string | null;
   tiempoPreparacion: number | null;
   foto: string | null;
   ingredientes: Array<{ id: number; nombre: string; cantidad: string | null; unidad: string | null }>;
@@ -149,6 +154,11 @@ export interface RecipePayload {
   categoriaRecetaId: number;
   descripcion?: string;
   calorias?: number | null;
+  proteinasG?: number | null;
+  carbohidratosG?: number | null;
+  grasasG?: number | null;
+  porciones?: number | null;
+  otroDatoNutricional?: string | null;
   tiempoPreparacion?: number | null;
   ingredientes: Array<{ nombre: string; cantidad?: string | null; unidad?: string | null }>;
   pasos: Array<{ descripcion: string }>;

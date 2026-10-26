@@ -36,11 +36,12 @@ export function RecipeFormModal({ recipe = null, onClose }: RecipeFormModalProps
   const [categoryId, setCategoryId] = useState(recipe ? String(recipe.categoria.id) : "")
   const [calories, setCalories] = useState(recipe?.calorias?.toString() ?? "")
   const [prepTime, setPrepTime] = useState(recipe?.tiempoPreparacion?.toString() ?? "")
-  // Proteínas, grasas, carbohidratos y otros datos: hoy la BD no tiene columnas para guardarlos (solo calorías).
-  const [protein, setProtein] = useState("")
-  const [fat, setFat] = useState("")
-  const [carbs, setCarbs] = useState("")
-  const [otherNutrition, setOtherNutrition] = useState("")
+  // Valores nutricionales POR PORCIÓN. Vacío = "No informado" (se guarda como NULL, nunca como 0).
+  const [protein, setProtein] = useState(recipe?.proteinasG?.toString() ?? "")
+  const [fat, setFat] = useState(recipe?.grasasG?.toString() ?? "")
+  const [carbs, setCarbs] = useState(recipe?.carbohidratosG?.toString() ?? "")
+  const [portions, setPortions] = useState(recipe?.porciones?.toString() ?? "")
+  const [otherNutrition, setOtherNutrition] = useState(recipe?.otroDatoNutricional ?? "")
   const [description, setDescription] = useState(recipe?.descripcion ?? "")
   const [ingredients, setIngredients] = useState<string[]>(recipe?.ingredientes.length ? recipe.ingredientes.map(formatIngredient) : [""])
   const [steps, setSteps] = useState<string[]>(recipe?.pasos.length ? recipe.pasos.map((step) => step.descripcion) : [""])
@@ -109,10 +110,34 @@ export function RecipeFormModal({ recipe = null, onClose }: RecipeFormModalProps
     onError: (error) => setErrors([getErrorMessage(error, "No se pudo guardar la receta")]),
   })
 
+  // Aviso suave (no bloquea el guardado): calorías declaradas vs. calculadas por macros (4/4/9 kcal por gramo).
+  const macroKcal = [protein, carbs, fat].every((value) => value.trim() !== "" && Number(value) >= 0)
+    ? Math.round(Number(protein) * 4 + Number(carbs) * 4 + Number(fat) * 9)
+    : null
+  const declaredKcal = calories.trim() === "" ? null : Number(calories)
+  const kcalMismatch =
+    macroKcal !== null && declaredKcal !== null && Number.isFinite(declaredKcal) && macroKcal > 0 && Math.abs(declaredKcal - macroKcal) / macroKcal > 0.25 && Math.abs(declaredKcal - macroKcal) > 50
+
   const handleSubmit = () => {
     const problems: string[] = []
     const kcal = calories.trim() === "" ? null : Number(calories)
     const minutes = prepTime.trim() === "" ? null : Number(prepTime)
+    const parseGrams = (value: string, label: string) => {
+      if (value.trim() === "") return null
+      const number = Number(value.replace(",", "."))
+      if (!Number.isFinite(number) || number < 0 || number > 999.9) {
+        problems.push(`${label} debe estar entre 0 y 999,9 g.`)
+        return null
+      }
+      return Math.round(number * 10) / 10
+    }
+    const proteinG = parseGrams(protein, "Las proteínas")
+    const carbsG = parseGrams(carbs, "Los carbohidratos")
+    const fatG = parseGrams(fat, "Las grasas")
+    const servings = portions.trim() === "" ? null : Number(portions)
+    if (servings !== null && (!Number.isInteger(servings) || servings < 1 || servings > 100)) problems.push("Las porciones deben ser un número entero entre 1 y 100.")
+    if (otherNutrition.trim().length > 150) problems.push("El otro dato nutricional no puede superar los 150 caracteres.")
+    if (kcal !== null && kcal > 10000) problems.push("Las calorías no pueden superar 10000 kcal.")
 
     if (!name.trim()) problems.push("Ingresá el nombre de la receta.")
     if (!categoryId) problems.push("Elegí una categoría.")
@@ -127,6 +152,11 @@ export function RecipeFormModal({ recipe = null, onClose }: RecipeFormModalProps
       categoriaRecetaId: Number(categoryId),
       descripcion: description.trim(),
       calorias: kcal,
+      proteinasG: proteinG,
+      carbohidratosG: carbsG,
+      grasasG: fatG,
+      porciones: servings,
+      otroDatoNutricional: otherNutrition.trim() || null,
       tiempoPreparacion: minutes,
       ingredientes: ingredients.map(parseIngredient).filter((item): item is NonNullable<typeof item> => item !== null),
       pasos: steps.map((step) => step.trim()).filter(Boolean).map((descripcion) => ({ descripcion })),
@@ -228,17 +258,19 @@ export function RecipeFormModal({ recipe = null, onClose }: RecipeFormModalProps
           <div className="grid grid-cols-2 gap-3">
             {(
               [
-                ["Calorías (kcal)", calories, setCalories, "350"],
-                ["Proteínas (g)", protein, setProtein, "25"],
-                ["Grasas (g)", fat, setFat, "10"],
-                ["Carbohidratos (g)", carbs, setCarbs, "40"],
+                ["Calorías (kcal)", calories, setCalories, "350", 1, 10000],
+                ["Proteínas (g)", protein, setProtein, "25", 0.1, 999.9],
+                ["Grasas (g)", fat, setFat, "10", 0.1, 999.9],
+                ["Carbohidratos (g)", carbs, setCarbs, "40", 0.1, 999.9],
               ] as const
-            ).map(([label, value, setter, placeholder]) => (
+            ).map(([label, value, setter, placeholder, step, max]) => (
               <div key={label} className="space-y-1">
                 <label className="text-xs text-muted-foreground">{label}</label>
                 <input
                   type="number"
                   min={0}
+                  max={max}
+                  step={step}
                   value={value}
                   onChange={(event) => setter(event.target.value)}
                   placeholder={placeholder}
@@ -247,11 +279,25 @@ export function RecipeFormModal({ recipe = null, onClose }: RecipeFormModalProps
               </div>
             ))}
           </div>
+          <p className="text-xs text-muted-foreground">Los valores se informan por porción. Dejá vacío lo que no sepas: se mostrará como «No informado».</p>
+          {kcalMismatch && (
+            <p role="status" className="flex items-start gap-2 rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-yellow-700 dark:text-yellow-500">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <span>
+                Las calorías declaradas ({declaredKcal} kcal) difieren bastante de las calculadas con los macros ({macroKcal} kcal: 4 kcal por g de proteína y carbohidrato, 9 por g de grasa). Podés guardar igual.
+              </span>
+            </p>
+          )}
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Porciones (a cuántas personas rinde)</label>
+            <input type="number" min={1} max={100} step={1} value={portions} onChange={(event) => setPortions(event.target.value)} placeholder="2" className={fieldClass} />
+          </div>
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">Otro dato nutricional (opcional)</label>
             <input
               type="text"
               value={otherNutrition}
+              maxLength={150}
               onChange={(event) => setOtherNutrition(event.target.value)}
               placeholder="Ej: Fibra 6g, Azúcares 12g, Sodio 200mg..."
               className={fieldClass}

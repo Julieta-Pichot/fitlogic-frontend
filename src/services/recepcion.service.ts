@@ -24,6 +24,9 @@ export type ReceptionPlan = {
   nombre: string;
   duracionDias: number;
   precio: number;
+  // Precio final calculado por el backend (promoción vigente incluida): es lo que se cobra.
+  precioFinal: number;
+  promocion: { id: number; nombre: string; descuento: number } | null;
 };
 
 export type UpdateProfilePayload = Partial<{
@@ -46,9 +49,9 @@ export const recepcionService = {
     const response = await api.get<ApiResponse<ReceptionPlan[]>>('/recepcion/planes');
     return response.data.data ?? [];
   },
-  // Confirma el pago de una cuota PENDIENTE: crea el Pago y la pasa a ACTIVA.
-  confirmPayment: async (cuotaId: number, payload: { metodoPagoId: number; monto: number }) => {
-    const response = await api.post<ApiResponse>(`/quotas/${cuotaId}/confirm-payment`, payload);
+  // Cobro en caja: cuota pendiente O plan (renovación sin solicitud previa). El monto lo calcula el backend.
+  registerPayment: async (payload: { clienteId: number; cuotaId?: number; planId?: number; metodoPagoId: number }) => {
+    const response = await api.post<ApiResponse>('/recepcion/pagos', payload);
     return response.data;
   },
   updateProfile: async (payload: UpdateProfilePayload) => {

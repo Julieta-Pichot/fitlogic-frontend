@@ -38,7 +38,8 @@ const emptyCreateForm = (): CreateUserPayload => ({
   telefono: '',
   rolId: 2,
   especialidades: [],
-  objetivoDiasSemana: 3,
+  // Sin valor por defecto: si se deja vacío el cliente queda "sin objetivo definido".
+  objetivoDiasSemana: undefined,
 });
 
 export function UsersManagement() {
@@ -114,8 +115,8 @@ export function UsersManagement() {
       telefono: user.telefono,
       rolId: user.rolId,
       especialidades: user.especialidades,
-      objetivoDiasSemana:
-        (user.profile.cliente as { objetivoDiasSemana?: number } | null)?.objetivoDiasSemana ?? 3,
+      // No se reenvía salvo que se cambie: editar un usuario nunca pisa el objetivo del cliente.
+      objetivoDiasSemana: undefined,
     });
   };
 
@@ -392,16 +393,16 @@ export function UsersManagement() {
           ) : null}
           {createForm.rolId === 4 ? (
             <label className="block space-y-2">
-              <span className="text-sm font-medium text-foreground">Objetivo semanal (días)</span>
+              <span className="text-sm font-medium text-foreground">Objetivo semanal (días, opcional)</span>
               <Input
                 type="number"
                 min={1}
                 max={7}
-                value={createForm.objetivoDiasSemana ?? 3}
+                value={createForm.objetivoDiasSemana ?? ''}
                 onChange={(event) =>
                   setCreateForm((prev) => ({
                     ...prev,
-                    objetivoDiasSemana: Number(event.target.value),
+                    objetivoDiasSemana: event.target.value === '' ? undefined : Number(event.target.value),
                   }))
                 }
               />

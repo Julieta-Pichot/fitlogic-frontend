@@ -17,11 +17,6 @@ import {
   Clock,
   DollarSign,
   Upload,
-  Wifi,
-  Edit,
-  Trash2,
-  Receipt,
-  Minus,
   Settings,
 } from "lucide-react"
 import toast from "react-hot-toast"
@@ -39,6 +34,8 @@ import {
 import { configService } from "@/services/api"
 import { useAuth } from "@/contexts/AuthContext"
 import { getErrorMessage } from "@/utils/get-error-message"
+import { formatGymDate, formatGymTime, gymTodayBounds } from "@/utils/gym-time"
+import { isValidPhone, PHONE_MESSAGE } from "@/utils/phone"
 import type { ApiFieldError } from "@/types"
 
 interface ReceptionistDashboardProps {
@@ -59,12 +56,16 @@ type ClientRecord = {
   email: string
   phone: string
   objetivo: string
+  // Días de racha por semana (1-7). null = sin objetivo definido.
+  racha: number | null
   plan: string
   status: ClientStatus
   cuota: "Activa" | "Vencida" | "Pendiente" | "Sin cuota"
   cuotaExpires: string
   // Cuota PENDIENTE más reciente del cliente: es la que se confirma al registrar un pago.
   pendingQuota: { id: number; planName: string; price: number } | null
+  // Todas las cuotas pendientes sin pago (puede haber varias por reintentos).
+  pendingQuotas: Array<{ id: number; planName: string; price: number }>
   aptoFisico: AptoStatus
   aptoLoadedAt: string
   aptoExpires: string
@@ -96,8 +97,9 @@ const getAptoStatus = (expiresAt: string | null): AptoStatus => {
 }
 
 const mapClient = (client: ClientApiRecord): ClientRecord => {
-  const latestQuota = client.cuotas[0]
-  const pendingQuota = client.cuotas.find((quota) => quota.estadoCuota.nombre === "PENDIENTE")
+  // Cuota que se muestra en la lista: la ACTIVA si hay una (una solicitud pendiente más nueva no la tapa); si no, la más reciente.
+  const latestQuota = client.cuotas.find((quota) => quota.estadoCuota.nombre === "ACTIVA") ?? client.cuotas[0]
+  const pendingQuota = client.cuotas.find((quota) => quota.estadoCuota.nombre === "PENDIENTE" && !quota.pago)
   const clientStatus = client.estadoCliente.nombre === "HABILITADO" ? "active" : client.estadoCliente.nombre === "INHABILITADO_PAGO" ? "pending_payment" : "inactive"
   const quotaStatus = !latestQuota
     ? "Sin cuota"
@@ -114,12 +116,16 @@ const mapClient = (client: ClientApiRecord): ClientRecord => {
     email: client.usuario.email,
     phone: client.usuario.telefono ?? "",
     objetivo: client.objetivoEntrenamiento ?? "",
+    racha: client.objetivoDiasRacha ?? null,
     plan: latestQuota?.plan.nombre ?? "Sin plan",
     status: clientStatus,
     cuota: quotaStatus,
     cuotaExpires: formatDateOnly(latestQuota?.fechaVencimiento),
+    pendingQuotas: client.cuotas
+      .filter((quota) => quota.estadoCuota.nombre === "PENDIENTE" && !quota.pago)
+      .map((quota) => ({ id: quota.id, planName: quota.plan.nombre, price: quota.montoACobrar ?? Number(quota.plan.precio) })),
     pendingQuota: pendingQuota
-      ? { id: pendingQuota.id, planName: pendingQuota.plan.nombre, price: Number(pendingQuota.plan.precio) }
+      ? { id: pendingQuota.id, planName: pendingQuota.plan.nombre, price: pendingQuota.montoACobrar ?? Number(pendingQuota.plan.precio) }
       : null,
     aptoFisico: getAptoStatus(client.aptoFisicoFechaVencimiento),
     aptoLoadedAt: formatDateOnly(client.aptoFisicoFechaCarga),
@@ -138,6 +144,7 @@ const fieldErrorsFromApi = (error: unknown): Record<string, string> => {
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const STREAK_PATTERN = /^[1-7]$/
 const APTO_ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"]
 const APTO_MAX_BYTES = 5 * 1024 * 1024
 
@@ -149,6 +156,7 @@ type NewClientForm = {
   telefono: string
   password: string
   objetivoEntrenamiento: string
+  objetivoDiasRacha: string
   planId: string
 }
 
@@ -159,6 +167,8 @@ const emptyNewClientForm: NewClientForm = {
   telefono: "",
   password: "",
   objetivoEntrenamiento: "",
+  // Sin valor por defecto: el recepcionista debe ingresarlo.
+  objetivoDiasRacha: "",
   planId: "",
 }
 
@@ -169,8 +179,11 @@ const validateNewClient = (form: NewClientForm) => {
   if (!form.email.trim()) errors.email = "Ingresá el email"
   else if (!EMAIL_PATTERN.test(form.email.trim())) errors.email = "El email no es válido"
   if (!form.telefono.trim()) errors.telefono = "Ingresá el teléfono"
+  else if (!isValidPhone(form.telefono)) errors.telefono = PHONE_MESSAGE
   if (!form.password) errors.password = "Ingresá una contraseña inicial"
   else if (form.password.length < 6) errors.password = "La contraseña debe tener al menos 6 caracteres"
+  if (!form.objetivoDiasRacha.trim()) errors.objetivoDiasRacha = "Ingresá los días de racha por semana (de 1 a 7)"
+  else if (!STREAK_PATTERN.test(form.objetivoDiasRacha.trim())) errors.objetivoDiasRacha = "Tiene que ser un número entero entre 1 y 7"
   if (!form.planId) errors.planId = "Seleccioná un plan"
   return errors
 }
@@ -195,21 +208,6 @@ const inputClass = (hasError?: boolean) =>
     hasError ? "border-red-500" : "border-border"
   }`
 
-const storeProducts = [
-  { id: 1, name: "Whey Protein Gold", category: "Proteínas", price: 45000, stock: 15 },
-  { id: 2, name: "Remera Deportiva FitLogic", category: "Ropa", price: 12000, stock: 25 },
-  { id: 3, name: "Creatina Monohidratada", category: "Suplementos", price: 18000, stock: 30 },
-  { id: 4, name: "Guantes de Entrenamiento", category: "Accesorios", price: 8500, stock: 20 },
-  { id: 5, name: "Pre-Workout Explosive", category: "Suplementos", price: 22000, stock: 12 },
-  { id: 6, name: "Botella Térmica 750ml", category: "Accesorios", price: 6500, stock: 18 },
-]
-
-const getFormattedHour = () =>
-  new Date().toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-
 export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashboardProps) {
   const { user, updateUser } = useAuth()
   const [activeTab, setActiveTab] = useState<TabType>("home")
@@ -229,7 +227,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
 
   // Detalle de cliente: edición y carga de apto físico
   const [isEditingClient, setIsEditingClient] = useState(false)
-  const [editForm, setEditForm] = useState({ nombre: "", apellido: "", telefono: "", objetivoEntrenamiento: "" })
+  const [editForm, setEditForm] = useState({ nombre: "", apellido: "", telefono: "", objetivoEntrenamiento: "", objetivoDiasRacha: "" })
   const [editErrors, setEditErrors] = useState<Record<string, string>>({})
   const [savingClient, setSavingClient] = useState(false)
   const [uploadingApto, setUploadingApto] = useState(false)
@@ -240,6 +238,8 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
   const [paymentList, setPaymentList] = useState<ReceptionPayment[]>([])
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
 
+  const [attendanceList, setAttendanceList] = useState<{ id: number; name: string; time: string }[]>([])
+
   const loadClients = useCallback(() => {
     return clientsService
       .list()
@@ -247,37 +247,41 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
       .catch((error) => toast.error(getErrorMessage(error, "No se pudieron cargar los clientes")))
   }, [])
 
+  // Errores de carga de las cards, pagos y asistencias: se muestran con un botón de reintentar (no se tragan en silencio).
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const loadStats = useCallback(() => {
     return recepcionService
       .getStats()
-      .then(setStats)
-      .catch(() => undefined)
+      .then((value) => {
+        setStats(value)
+        setLoadError(null)
+      })
+      .catch((error) => setLoadError(getErrorMessage(error, "No se pudieron cargar los datos de recepción")))
   }, [])
 
   const loadPayments = useCallback(() => {
     return recepcionService
       .listPayments(50)
       .then(setPaymentList)
-      .catch(() => undefined)
+      .catch((error) => setLoadError(getErrorMessage(error, "No se pudieron cargar los pagos")))
   }, [])
 
   const loadAttendance = useCallback(() => {
-    const dayStart = new Date()
-    dayStart.setHours(0, 0, 0, 0)
-    const dayEnd = new Date(dayStart)
-    dayEnd.setDate(dayEnd.getDate() + 1)
+    // "Hoy" en hora de Buenos Aires (no la del navegador); el límite superior es exclusivo en la práctica (00:00 del día siguiente).
+    const { desde, hasta } = gymTodayBounds()
     return attendanceService
-      .list({ desde: dayStart.toISOString(), hasta: dayEnd.toISOString() })
+      .list({ desde, hasta })
       .then((items) =>
         setAttendanceList(
           items.map((item) => ({
             id: item.id,
             name: `${item.cliente.usuario.nombre} ${item.cliente.usuario.apellido}`.trim(),
-            time: new Date(item.fechaHora).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }),
+            time: formatGymTime(item.fechaHora),
           })),
         ),
       )
-      .catch(() => undefined)
+      .catch((error) => setLoadError(getErrorMessage(error, "No se pudieron cargar las asistencias de hoy")))
   }, [])
 
   useEffect(() => {
@@ -294,33 +298,30 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
   }, [loadClients, loadStats, loadPayments, loadAttendance])
 
   // Stock de productos editable y registro de ventas
-  const [productList, setProductList] = useState(storeProducts)
-  const [sales, setSales] = useState<
-    { id: string; client: string; product: string; quantity: number; amount: number; time: string }[]
-  >([
-    { id: "VTA-8F2K1A", client: "María García", product: "Whey Protein Gold", quantity: 1, amount: 45000, time: "10:24" },
-    { id: "VTA-3J9P7Z", client: "Mostrador (efectivo)", product: "Botella Térmica 750ml", quantity: 2, amount: 13000, time: "11:05" },
-  ])
-
   // Registrar pago
-  const [paymentForm, setPaymentForm] = useState<{ clientId: number | null; amount: string; methodId: string }>({
+  // `target`: "c:<id>" = cuota pendiente del cliente, "p:<id>" = plan a cobrar (renovación sin solicitud previa).
+  const [paymentForm, setPaymentForm] = useState<{ clientId: number | null; target: string; methodId: string }>({
     clientId: null,
-    amount: "",
+    target: "",
     methodId: "",
   })
   const [paymentError, setPaymentError] = useState("")
   const [registeringPayment, setRegisteringPayment] = useState(false)
   const paymentClient = clientList.find((client) => client.id === paymentForm.clientId) ?? null
-  const paymentQuota = paymentClient?.pendingQuota ?? null
+  // Opciones de cobro: primero las cuotas pendientes del cliente, después los planes activos.
+  const paymentOptions = [
+    ...(paymentClient?.pendingQuotas ?? []).map((quota) => ({ value: `c:${quota.id}`, label: `Cuota pendiente · ${quota.planName}`, price: quota.price })),
+    ...plans.map((plan) => ({ value: `p:${plan.id}`, label: `Plan · ${plan.nombre}${plan.promocion ? ` (${plan.promocion.descuento}% OFF)` : ""}`, price: plan.precioFinal })),
+  ]
+  const paymentTarget = paymentForm.target || paymentOptions[0]?.value || ""
+  const paymentChoice = paymentOptions.find((option) => option.value === paymentTarget) ?? null
   const paymentMethodId = paymentForm.methodId || (paymentMethods[0] ? String(paymentMethods[0].id) : "")
 
   // Asistencia
-  const [attendanceList, setAttendanceList] = useState<{ id: number; name: string; time: string }[]>([])
   const [attendanceForm, setAttendanceForm] = useState<{ clientId: number | null }>({ clientId: null })
   const [attendanceMessage, setAttendanceMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
   const [registeringAttendance, setRegisteringAttendance] = useState(false)
-  const [scanStatus, setScanStatus] = useState("Esperando ingreso por QR del gimnasio...")
-  const [isScanning, setIsScanning] = useState(false)
+
 
   // Configuración (datos del recepcionista logueado)
   const [profileForm, setProfileForm] = useState({
@@ -332,92 +333,36 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
   const [profileErrors, setProfileErrors] = useState<Record<string, string>>({})
   const [savingProfile, setSavingProfile] = useState(false)
 
-  const [editStockProduct, setEditStockProduct] = useState<(typeof storeProducts)[0] | null>(null)
-  const [stockValue, setStockValue] = useState(0)
-  // Buscador de productos en la sección de ventas
-  const [productSearch, setProductSearch] = useState("")
-
-  const filteredProducts = productList.filter((p) =>
-    p.name.toLowerCase().includes(productSearch.toLowerCase()),
-  )
-
-  const genSaleId = () => "VTA-" + Math.random().toString(36).slice(2, 8).toUpperCase()
-
-  // Al vender: descuenta 1 del stock y suma una venta al registro
-  const handleSell = (productId: number) => {
-    const product = productList.find((p) => p.id === productId)
-    if (!product || product.stock <= 0) return
-    setProductList((prev) =>
-      prev.map((p) => (p.id === productId ? { ...p, stock: p.stock - 1 } : p)),
-    )
-    setSales((prev) => [
-      {
-        id: genSaleId(),
-        client: "Mostrador (efectivo)",
-        product: product.name,
-        quantity: 1,
-        amount: product.price,
-        time: new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }),
-      },
-      ...prev,
-    ])
-  }
-
-  const saveStock = () => {
-    if (!editStockProduct) return
-    setProductList((prev) =>
-      prev.map((p) => (p.id === editStockProduct.id ? { ...p, stock: Math.max(0, stockValue) } : p)),
-    )
-    setEditStockProduct(null)
-  }
-
   const selectPaymentClient = (clientId: number | null) => {
     const client = clientList.find((item) => item.id === clientId)
     setPaymentError("")
-    // Al elegir cliente se autocompleta el monto con el precio del plan de su cuota pendiente.
-    setPaymentForm((prev) => ({
-      ...prev,
-      clientId,
-      amount: client?.pendingQuota ? String(client.pendingQuota.price) : "",
-    }))
+    // Al elegir cliente se propone su cuota pendiente (o el primer plan) y el monto sale del backend.
+    setPaymentForm((prev) => ({ ...prev, clientId, target: client?.pendingQuotas[0] ? `c:${client.pendingQuotas[0].id}` : "" }))
   }
 
   const handleRegisterPayment = async () => {
-    const amount = Number(paymentForm.amount)
-
+    if (registeringPayment) return
     if (!paymentClient) return setPaymentError("Seleccioná un cliente")
-    if (!paymentQuota) return setPaymentError("Este cliente no tiene una cuota pendiente de pago")
-    if (!paymentForm.amount || !Number.isFinite(amount) || amount <= 0) return setPaymentError("Ingresá un monto mayor a 0")
+    if (!paymentChoice) return setPaymentError("Elegí la cuota pendiente o el plan a cobrar")
     if (!paymentMethodId) return setPaymentError("Seleccioná un método de pago")
 
     setPaymentError("")
     setRegisteringPayment(true)
     try {
-      await recepcionService.confirmPayment(paymentQuota.id, { metodoPagoId: Number(paymentMethodId), monto: amount })
+      const [kind, id] = paymentTarget.split(":")
+      await recepcionService.registerPayment({
+        clienteId: paymentClient.id,
+        ...(kind === "c" ? { cuotaId: Number(id) } : { planId: Number(id) }),
+        metodoPagoId: Number(paymentMethodId),
+      })
       toast.success(`Pago registrado: ${paymentClient.name}`)
-      setPaymentForm({ clientId: null, amount: "", methodId: "" })
+      setPaymentForm({ clientId: null, target: "", methodId: "" })
       await Promise.all([loadClients(), loadPayments(), loadStats()])
     } catch (error) {
       setPaymentError(getErrorMessage(error, "No se pudo registrar el pago"))
     } finally {
       setRegisteringPayment(false)
     }
-  }
-
-  const getAccessEligibility = (client: ClientRecord) => {
-    if (client.status === "inactive") {
-      return { allowed: false, reason: "Cliente inactivo en el sistema" }
-    }
-
-    if (client.cuota !== "Activa") {
-      return { allowed: false, reason: "Cuota pendiente o vencida" }
-    }
-
-    if (client.aptoFisico !== "Vigente") {
-      return { allowed: false, reason: "Apto físico pendiente o vencido" }
-    }
-
-    return { allowed: true, reason: "Acceso autorizado" }
   }
 
   // El backend valida el acceso (cuota activa, apto vigente, cliente habilitado) y
@@ -437,7 +382,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
         {
           id: attendance.id,
           name: clientName,
-          time: new Date(attendance.fechaHora).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }),
+          time: formatGymTime(attendance.fechaHora),
         },
         ...prev,
       ])
@@ -454,25 +399,6 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
       loadClients()
       loadStats()
     }
-  }
-
-  const handleScanQrEntry = () => {
-    const eligibleClients = clientList.filter((client) => getAccessEligibility(client).allowed)
-
-    if (eligibleClients.length === 0) {
-      setScanStatus("No hay clientes habilitados para entrar al gimnasio")
-      return
-    }
-
-    setIsScanning(true)
-    setScanStatus("Escaneando QR del gimnasio...")
-
-    window.setTimeout(() => {
-      const selectedClient = eligibleClients[Math.floor(Math.random() * eligibleClients.length)]
-      handleRegisterAttendance(selectedClient.id)
-      setIsScanning(false)
-      setScanStatus(`QR validado: ${selectedClient.name} ingresó automáticamente`)
-    }, 700)
   }
 
   const openClientDetail = (client: ClientRecord) => {
@@ -494,6 +420,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
       apellido: showClientDetail.apellido,
       telefono: showClientDetail.phone,
       objetivoEntrenamiento: showClientDetail.objetivo,
+      objetivoDiasRacha: showClientDetail.racha === null ? "" : String(showClientDetail.racha),
     })
     setEditErrors({})
     setIsEditingClient(true)
@@ -505,6 +432,9 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
     if (!editForm.nombre.trim()) errors.nombre = "Ingresá el nombre"
     if (!editForm.apellido.trim()) errors.apellido = "Ingresá el apellido"
     if (!editForm.telefono.trim()) errors.telefono = "Ingresá el teléfono"
+    else if (!isValidPhone(editForm.telefono)) errors.telefono = PHONE_MESSAGE
+    // En la edición el campo puede quedar vacío (cliente sin objetivo); si se completa, entero de 1 a 7.
+    if (editForm.objetivoDiasRacha.trim() && !STREAK_PATTERN.test(editForm.objetivoDiasRacha.trim())) errors.objetivoDiasRacha = "Tiene que ser un número entero entre 1 y 7"
     setEditErrors(errors)
     if (Object.keys(errors).length) return
 
@@ -515,6 +445,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
         apellido: editForm.apellido.trim(),
         telefono: editForm.telefono.trim(),
         objetivoEntrenamiento: editForm.objetivoEntrenamiento.trim(),
+        ...(editForm.objetivoDiasRacha.trim() ? { objetivoDiasRacha: Number(editForm.objetivoDiasRacha.trim()) } : {}),
       })
       setClientList((prev) => prev.map((client) => (client.id === updated.id ? mapClient(updated) : client)))
       setIsEditingClient(false)
@@ -557,10 +488,6 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
     }
   }
 
-  const deleteProduct = (productId: number) => {
-    setProductList((prev) => prev.filter((p) => p.id !== productId))
-  }
-
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat("es-AR", {
       style: "currency",
@@ -574,8 +501,8 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
     const matchesStatus =
       filterStatus === "all" ||
       (filterStatus === "active" && client.status === "active") ||
-      // "Pagos pendientes": la cuota MÁS RECIENTE del cliente está en estado PENDIENTE.
-      (filterStatus === "cuota_pendiente" && client.cuota === "Pendiente") ||
+      // "Pagos pendientes": el cliente tiene al menos una cuota PENDIENTE sin pago (igual que la card de Inicio y Pagos).
+      (filterStatus === "cuota_pendiente" && client.pendingQuotas.length > 0) ||
       // Igual que la card "Clientes inactivos": inhabilitados por pago o por baja.
       (filterStatus === "inactive" && client.status !== "active")
     return matchesSearch && matchesStatus
@@ -611,6 +538,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
         password: newClientForm.password,
         telefono: newClientForm.telefono.trim(),
         objetivoEntrenamiento: newClientForm.objetivoEntrenamiento.trim() || undefined,
+        objetivoDiasRacha: Number(newClientForm.objetivoDiasRacha.trim()),
         planId: Number(newClientForm.planId),
       })
       setClientList((prev) => [mapClient(created), ...prev])
@@ -758,9 +686,6 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
               className="relative p-2 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors"
             >
               <Bell className="w-5 h-5 text-foreground" />
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-primary text-primary-foreground text-xs rounded-full flex items-center justify-center font-medium">
-                4
-              </span>
             </button>
           </div>
         </div>
@@ -768,6 +693,23 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
 
       {/* Main Content */}
       <main className="w-full flex-1 p-4 lg:p-6">
+        {loadError && (
+          <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3">
+            <p className="flex items-center gap-2 text-sm text-red-500">
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" /> {loadError}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setLoadError(null)
+                void Promise.all([loadClients(), loadStats(), loadPayments(), loadAttendance()])
+              }}
+              className="rounded-lg bg-secondary px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary/70"
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
         {activeTab === "home" && (
           <div className="space-y-6 w-full">
             {/* Welcome */}
@@ -841,7 +783,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                     <div>
                       <p className="font-medium text-foreground">{payment.cliente.nombre}</p>
                       <p className="text-sm text-muted-foreground">
-                        {new Date(payment.fechaPago).toLocaleDateString("es-AR")} • {formatMethodName(payment.metodoPago)}
+                        {formatGymDate(payment.fechaPago)} • {formatMethodName(payment.metodoPago)}
                       </p>
                     </div>
                     <span className="font-semibold text-green-500">{formatPrice(payment.monto)}</span>
@@ -966,7 +908,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
             <div className="bg-card border border-border rounded-2xl p-5">
               <h2 className="font-semibold text-foreground mb-1">Registrar Pago</h2>
               <p className="text-sm text-muted-foreground mb-4">
-                Confirma el pago de la cuota pendiente del cliente: la cuota pasa a activa.
+                Elegí el cliente y qué se cobra (su cuota pendiente o un plan). El monto lo calcula el sistema con el precio vigente y la membresía arranca hoy.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-2">
@@ -980,19 +922,24 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Monto</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={paymentForm.amount}
+                  <label className="text-sm font-medium text-foreground" htmlFor="pago-concepto">Qué se cobra</label>
+                  <select
+                    id="pago-concepto"
+                    value={paymentTarget}
+                    disabled={!paymentClient}
                     onChange={(e) => {
                       setPaymentError("")
-                      setPaymentForm((prev) => ({ ...prev, amount: e.target.value }))
+                      setPaymentForm((prev) => ({ ...prev, target: e.target.value }))
                     }}
-                    placeholder="Monto"
                     className={inputClass()}
-                  />
+                  >
+                    {!paymentClient && <option value="">Elegí primero un cliente</option>}
+                    {paymentOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Método de pago</label>
@@ -1012,16 +959,16 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                 </div>
               </div>
 
-              {paymentClient && paymentQuota && (
-                <p className="mt-3 text-sm text-muted-foreground">
-                  Cuota pendiente: <span className="text-foreground font-medium">{paymentQuota.planName}</span> —
-                  precio del plan {formatPrice(paymentQuota.price)}
+              {paymentClient && paymentChoice && (
+                <p className="mt-3 text-sm text-muted-foreground" aria-live="polite">
+                  Monto a cobrar: <span className="text-foreground text-lg font-semibold">{formatPrice(paymentChoice.price)}</span>
+                  <span className="ml-2 text-xs">(precio del plan con la promoción vigente; no se puede editar)</span>
                 </p>
               )}
-              {paymentClient && !paymentQuota && (
+              {paymentClient && paymentOptions.length === 0 && (
                 <p className="mt-3 flex items-center gap-1.5 text-sm text-yellow-500">
                   <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                  Este cliente no tiene una cuota pendiente de pago.
+                  No hay planes activos para cobrar. Cargalos en el panel de administración.
                 </p>
               )}
               <div className="mt-3">
@@ -1056,7 +1003,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                       <div>
                         <p className="font-medium text-foreground">{payment.cliente.nombre}</p>
                         <p className="text-sm text-muted-foreground">
-                          {new Date(payment.fechaPago).toLocaleDateString("es-AR")} • {formatMethodName(payment.metodoPago)} • {payment.plan}
+                          {formatGymDate(payment.fechaPago)} • {formatMethodName(payment.metodoPago)} • {payment.plan}
                         </p>
                       </div>
                     </div>
@@ -1072,23 +1019,20 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
           <div className="space-y-6 w-full">
             <div>
               <h1 className="text-2xl font-bold text-foreground">Asistencia</h1>
-              <p className="text-muted-foreground mt-1">Sincronizada automáticamente con el sistema de entrada</p>
+              <p className="text-muted-foreground mt-1">Registrá el ingreso de cada cliente: el sistema valida su estado, cuota y apto físico</p>
             </div>
 
             {/* Automatic Sync Notice */}
             <div className="bg-card border border-border rounded-2xl p-5">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <Wifi className="w-5 h-5 text-green-500" />
+                  <Check className="w-5 h-5 text-green-500" />
                 </div>
                 <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h2 className="font-semibold text-foreground">Registro Automático Activo</h2>
-                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                  </div>
+                  <h2 className="font-semibold text-foreground">Control de acceso</h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Las asistencias se registran automáticamente cuando el cliente ingresa por el
-                    sistema de entrada del gimnasio (molinete / lector). No es necesario cargarlas a mano.
+                    Al registrar el ingreso se verifica que el cliente esté habilitado, tenga la cuota vigente (con 3 días de
+                    tolerancia tras el vencimiento) y el apto físico al día. La hora queda guardada en hora de Buenos Aires.
                   </p>
                 </div>
               </div>
@@ -1099,27 +1043,10 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
             <div className="bg-card border border-border rounded-2xl">
               <div className="p-4 border-b border-border flex items-center justify-between">
                 <h2 className="font-semibold text-foreground">Asistencias de Hoy ({attendanceList.length})</h2>
-                <span className="text-sm text-muted-foreground">{new Date().toLocaleDateString("es-AR")}</span>
+                <span className="text-sm text-muted-foreground">{formatGymDate(new Date())}</span>
               </div>
 
               <div className="p-4 border-b border-border space-y-4">
-                <div className="rounded-2xl border border-dashed border-primary/50 bg-primary/5 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Entrada automática del gimnasio</p>
-                      <p className="font-semibold text-foreground">Escáner QR en acceso</p>
-                    </div>
-                    <button
-                      onClick={handleScanQrEntry}
-                      disabled={isScanning}
-                      className="px-4 py-3 bg-primary text-primary-foreground rounded-xl font-medium hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {isScanning ? "Escaneando..." : "Escanear QR"}
-                    </button>
-                  </div>
-                  <p className="mt-3 text-sm text-primary font-medium">{scanStatus}</p>
-                </div>
-
                 <div className="space-y-2">
                   <div className="flex gap-3">
                     <div className="flex-1">
@@ -1130,7 +1057,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                           setAttendanceMessage(null)
                           setAttendanceForm({ clientId })
                         }}
-                        placeholder="Ingreso manual (respaldo): elegí un cliente"
+                        placeholder="Elegí el cliente que ingresa"
                         invalid={attendanceMessage?.type === "error" && !attendanceForm.clientId}
                       />
                     </div>
@@ -1161,181 +1088,13 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                       </div>
                       <div>
                         <span className="font-medium text-foreground">{entry.name}</span>
-                        <p className="text-xs text-muted-foreground">Ingreso automático por acceso</p>
+                        <p className="text-xs text-muted-foreground">Ingreso registrado en recepción</p>
                       </div>
                     </div>
                     <span className="text-muted-foreground">{entry.time}</span>
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === "tienda" && (
-          <div className="space-y-6 w-full">
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Tienda</h1>
-              <p className="text-muted-foreground mt-1">Vende productos en efectivo y gestiona el stock</p>
-            </div>
-
-            {/* Store Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-              <div className="bg-card border border-border rounded-2xl p-4">
-                <p className="text-sm text-muted-foreground">Ventas del Día</p>
-                <p className="text-2xl font-bold text-foreground mt-1">
-                  {formatPrice(sales.reduce((sum, s) => sum + s.amount, 0))}
-                </p>
-              </div>
-              <div className="bg-card border border-border rounded-2xl p-4">
-                <p className="text-sm text-muted-foreground">Productos Vendidos</p>
-                <p className="text-2xl font-bold text-foreground mt-1">
-                  {sales.reduce((sum, s) => sum + s.quantity, 0)}
-                </p>
-              </div>
-              <div className="bg-card border border-border rounded-2xl p-4 col-span-2 lg:col-span-1">
-                <p className="text-sm text-muted-foreground">Stock Bajo</p>
-                <p className="text-2xl font-bold text-yellow-500 mt-1">
-                  {productList.filter((p) => p.stock < 15).length} productos
-                </p>
-              </div>
-            </div>
-
-            {/* Products Table */}
-            <div className="bg-card border border-border rounded-2xl overflow-hidden">
-              <div className="p-4 border-b border-border space-y-3">
-                <div>
-                  <h2 className="font-semibold text-foreground">Catálogo de Productos</h2>
-                  <p className="text-sm text-muted-foreground mt-0.5">
-                    Al vender se descuenta 1 del stock y se agrega la venta al registro.
-                  </p>
-                </div>
-                {/* Buscador de productos por nombre */}
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                  <input
-                    type="text"
-                    value={productSearch}
-                    onChange={(e) => setProductSearch(e.target.value)}
-                    placeholder="Buscar producto por nombre..."
-                    className="w-full pl-11 pr-4 py-3 bg-secondary border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground"
-                  />
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-secondary/50">
-                    <tr>
-                      <th className="text-left p-4 text-sm font-medium text-muted-foreground">Producto</th>
-                      <th className="text-left p-4 text-sm font-medium text-muted-foreground">Categoría</th>
-                      <th className="text-left p-4 text-sm font-medium text-muted-foreground">Precio</th>
-                      <th className="text-left p-4 text-sm font-medium text-muted-foreground">Stock</th>
-                      <th className="text-right p-4 text-sm font-medium text-muted-foreground">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {filteredProducts.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="p-6 text-center text-sm text-muted-foreground">
-                          No se encontraron productos con ese nombre.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredProducts.map((product) => (
-                      <tr key={product.id} className="hover:bg-secondary/30 transition-colors">
-                        <td className="p-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-secondary rounded-xl flex items-center justify-center">
-                              <ShoppingBag className="w-5 h-5 text-muted-foreground" />
-                            </div>
-                            <span className="font-medium text-foreground">{product.name}</span>
-                          </div>
-                        </td>
-                        <td className="p-4 text-muted-foreground">{product.category}</td>
-                        <td className="p-4 font-medium text-foreground">{formatPrice(product.price)}</td>
-                        <td className="p-4">
-                          <span className={`font-medium ${product.stock === 0 ? "text-red-500" : product.stock < 15 ? "text-yellow-500" : "text-green-500"}`}>
-                            {product.stock} u.
-                          </span>
-                        </td>
-                        <td className="p-4">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => handleSell(product.id)}
-                              disabled={product.stock <= 0}
-                              className="px-3 py-1.5 bg-primary text-primary-foreground text-sm rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              Vender
-                            </button>
-                            <button
-                              onClick={() => {
-                                setEditStockProduct(product)
-                                setStockValue(product.stock)
-                              }}
-                              aria-label={`Editar stock de ${product.name}`}
-                              className="p-2 hover:bg-secondary rounded-lg transition-colors"
-                            >
-                              <Edit className="w-4 h-4 text-muted-foreground" />
-                            </button>
-                            <button
-                              onClick={() => deleteProduct(product.id)}
-                              aria-label={`Eliminar ${product.name}`}
-                              className="p-2 hover:bg-red-500/10 rounded-lg transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4 text-red-500" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Sales Registry */}
-            <div className="bg-card border border-border rounded-2xl overflow-hidden">
-              <div className="p-4 border-b border-border flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-primary" />
-                <h2 className="font-semibold text-foreground">Registro de Ventas</h2>
-              </div>
-              {sales.length === 0 ? (
-                <p className="p-6 text-sm text-muted-foreground text-center">
-                  Todavía no se registraron ventas hoy.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-secondary/50">
-                      <tr>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">ID Compra</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Comprador</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Producto</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Cant.</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Monto</th>
-                        <th className="text-right p-4 text-sm font-medium text-muted-foreground">Hora</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {sales.map((sale) => (
-                        <tr key={sale.id} className="hover:bg-secondary/30 transition-colors">
-                          <td className="p-4">
-                            <span className="font-mono text-xs px-2 py-1 bg-secondary text-foreground rounded-lg">
-                              {sale.id}
-                            </span>
-                          </td>
-                          <td className="p-4 font-medium text-foreground">{sale.client}</td>
-                          <td className="p-4 text-muted-foreground">{sale.product}</td>
-                          <td className="p-4 text-foreground">{sale.quantity}</td>
-                          <td className="p-4 font-medium text-green-500">{formatPrice(sale.amount)}</td>
-                          <td className="p-4 text-right text-muted-foreground">{sale.time}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
             </div>
           </div>
         )}
@@ -1542,6 +1301,25 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                 <FieldError message={newClientErrors.objetivoEntrenamiento} />
               </div>
               <div className="space-y-2">
+                <label htmlFor="nuevo-cliente-racha" className="text-sm font-medium text-foreground">
+                  Días de racha por semana (objetivo)
+                </label>
+                <input
+                  id="nuevo-cliente-racha"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={7}
+                  step={1}
+                  required
+                  value={newClientForm.objetivoDiasRacha}
+                  onChange={(e) => updateNewClientField("objetivoDiasRacha", e.target.value)}
+                  className={inputClass(Boolean(newClientErrors.objetivoDiasRacha))}
+                />
+                <FieldError message={newClientErrors.objetivoDiasRacha} />
+                <p className="text-xs text-muted-foreground">Entero de 1 a 7. Es la meta semanal de asistencia que verá el cliente.</p>
+              </div>
+              <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Plan</label>
                 <select
                   value={newClientForm.planId}
@@ -1641,6 +1419,23 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                     />
                     <FieldError message={editErrors.objetivoEntrenamiento} />
                   </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="editar-cliente-racha" className="text-sm font-medium text-foreground">
+                      Días de racha por semana (objetivo)
+                    </label>
+                    <input
+                      id="editar-cliente-racha"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={7}
+                      step={1}
+                      value={editForm.objetivoDiasRacha}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, objetivoDiasRacha: e.target.value }))}
+                      className={inputClass(Boolean(editErrors.objetivoDiasRacha))}
+                    />
+                    <FieldError message={editErrors.objetivoDiasRacha} />
+                  </div>
                   <div className="flex items-center gap-3 p-3 bg-secondary rounded-xl">
                     <Mail className="w-5 h-5 text-muted-foreground" />
                     <span className="text-foreground">{showClientDetail.email}</span>
@@ -1659,6 +1454,10 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                   <div className="p-3 bg-secondary rounded-xl">
                     <p className="text-sm text-muted-foreground">Objetivo de entrenamiento</p>
                     <p className="font-medium text-foreground">{showClientDetail.objetivo || "-"}</p>
+                  </div>
+                  <div className="p-3 bg-secondary rounded-xl">
+                    <p className="text-sm text-muted-foreground">Días de racha por semana (objetivo)</p>
+                    <p className="font-medium text-foreground">{showClientDetail.racha === null ? "Sin definir" : `${showClientDetail.racha} ${showClientDetail.racha === 1 ? "día" : "días"}`}</p>
                   </div>
                 </div>
               )}
@@ -1783,64 +1582,6 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
         </div>
       )}
 
-      {/* Edit Stock Modal */}
-      {editStockProduct && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-2xl w-full max-w-sm">
-            <div className="p-5 border-b border-border flex items-center justify-between">
-              <h2 className="text-lg font-bold text-foreground">Editar Stock</h2>
-              <button
-                onClick={() => setEditStockProduct(null)}
-                className="p-2 hover:bg-secondary rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5 text-muted-foreground" />
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-secondary rounded-xl flex items-center justify-center">
-                  <ShoppingBag className="w-6 h-6 text-muted-foreground" />
-                </div>
-                <div>
-                  <p className="font-semibold text-foreground">{editStockProduct.name}</p>
-                  <p className="text-sm text-muted-foreground">{editStockProduct.category}</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Unidades en stock</label>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setStockValue((v) => Math.max(0, v - 1))}
-                    aria-label="Restar una unidad"
-                    className="w-11 h-11 flex items-center justify-center bg-secondary text-foreground rounded-xl hover:bg-secondary/80 transition-colors"
-                  >
-                    <Minus className="w-5 h-5" />
-                  </button>
-                  <input
-                    type="number"
-                    value={stockValue}
-                    onChange={(e) => setStockValue(Math.max(0, Number(e.target.value)))}
-                    className="flex-1 text-center px-4 py-3 bg-secondary border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary text-foreground font-semibold"
-                  />
-                  <button
-                    onClick={() => setStockValue((v) => v + 1)}
-                    aria-label="Sumar una unidad"
-                    className="w-11 h-11 flex items-center justify-center bg-secondary text-foreground rounded-xl hover:bg-secondary/80 transition-colors"
-                  >
-                    <Plus className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-              <button
-                onClick={saveStock}
-                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-semibold hover:bg-primary/90 transition-colors"
-              >
-                Guardar Stock
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

@@ -1,62 +1,77 @@
-import { useEffect, useState } from "react"
-import { Calendar, ChevronRight, Dumbbell, History } from "lucide-react"
-import { routinesService, type RoutineRecord } from "@/services/routines.service"
-
-const dayNames = ["", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { Dumbbell, History } from "lucide-react"
+import { Badge } from "@/components/ui"
+import { clientService } from "@/services/client.service"
+import { formatIsoDate } from "@/utils/gym-time"
+import type { ClientRoutine } from "@/types/client"
+import { EmptyBlock, QueryState } from "./client-ui"
+import { RoutineCard, RoutineModal } from "./routine-views"
 
 export function ClientRoutines() {
   const [showHistory, setShowHistory] = useState(false)
-  const [routines, setRoutines] = useState<RoutineRecord[]>([])
-  const [loading, setLoading] = useState(true)
+  const [viewing, setViewing] = useState<ClientRoutine | null>(null)
 
-  useEffect(() => {
-    setLoading(true)
-    routinesService.listMine(showHistory).then(setRoutines).catch(() => setRoutines([])).finally(() => setLoading(false))
-  }, [showHistory])
+  const active = useQuery({ queryKey: ["client", "routines"], queryFn: clientService.listRoutines, enabled: !showHistory })
+  const history = useQuery({ queryKey: ["client", "routines", "history"], queryFn: clientService.listRoutineHistory, enabled: showHistory })
+  const query = showHistory ? history : active
+  const routines = query.data ?? []
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Mis Rutinas</h1>
-        <p className="text-muted-foreground mt-1">Información asignada por tu profesor</p>
+        <p className="mt-1 text-muted-foreground">Información asignada por tus profesores</p>
       </div>
 
-      <div className="flex gap-2 p-1 bg-secondary rounded-xl">
-        <button onClick={() => setShowHistory(false)} className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-medium ${!showHistory ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
-          <Dumbbell className="w-4 h-4 inline mr-2" />Rutina Actual
+      <div className="flex gap-2 rounded-xl bg-secondary p-1" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!showHistory}
+          onClick={() => setShowHistory(false)}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${!showHistory ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}
+        >
+          <Dumbbell className="h-4 w-4" /> Mis rutinas
         </button>
-        <button onClick={() => setShowHistory(true)} className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-medium ${showHistory ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
-          <History className="w-4 h-4 inline mr-2" />Historial
+        <button
+          type="button"
+          role="tab"
+          aria-selected={showHistory}
+          onClick={() => setShowHistory(true)}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${showHistory ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}
+        >
+          <History className="h-4 w-4" /> Historial
         </button>
       </div>
 
-      {loading ? <p className="text-muted-foreground">Cargando rutinas...</p> : routines.length === 0 ? (
-        <div className="bg-card border border-border rounded-2xl p-6 text-center text-muted-foreground">No hay rutinas cargadas.</div>
-      ) : (
-        <div className="space-y-4">
-          {showHistory && <p className="text-sm text-muted-foreground">Mostrando rutinas del mes calendario anterior.</p>}
-          {routines.map((routine) => (
-            <section key={routine.id} className="bg-card border border-border rounded-2xl overflow-hidden">
-              <div className="p-4 border-b border-border flex items-center justify-between">
-                <div>
-                  <h2 className="font-semibold text-foreground">{routine.nombre}</h2>
-                  <p className="text-sm text-muted-foreground">{routine.objetivo ?? routine.descripcion ?? "Sin objetivo"}</p>
-                </div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground"><Calendar className="w-4 h-4" />{routine.dias.map((day) => dayNames[day.diaSemana]).join(" · ")}</div>
-              </div>
-              <div className="divide-y divide-border">
-                {routine.ejercicios.map((item, index) => (
-                  <div key={`${routine.id}-${item.ejercicio.nombre}-${index}`} className="p-4 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center text-sm font-semibold text-muted-foreground">{index + 1}</div>
-                    <div className="flex-1"><p className="font-medium text-foreground">{item.ejercicio.nombre}</p><p className="text-sm text-muted-foreground">{item.series ?? "-"} series · {item.repeticiones ?? "-"} repeticiones</p></div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
+      <QueryState query={query} label="Cargando rutinas..." fallback="No se pudieron cargar las rutinas">
+        {routines.length === 0 ? (
+          <EmptyBlock
+            icon={showHistory ? <History className="h-7 w-7" /> : <Dumbbell className="h-7 w-7" />}
+            title={showHistory ? "Sin rutinas en los últimos 30 días" : "No tenés rutinas activas"}
+            description={showHistory ? "Acá vas a ver las rutinas que te asignaron durante el último mes." : "Cuando un profesor te asigne una rutina, la vas a ver acá."}
+          />
+        ) : (
+          <div className="space-y-4">
+            {showHistory && <p className="text-sm text-muted-foreground">Rutinas asignadas en los últimos 30 días, de la más reciente a la más antigua.</p>}
+            <ul className="space-y-3">
+              {routines.map((routine) => (
+                <li key={routine.id} className="space-y-1">
+                  {showHistory && (
+                    <p className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+                      Asignada el {formatIsoDate(routine.fechaAsignacion)} · <Badge variant={routine.activa ? "success" : "secondary"}>{routine.activa ? "Activa" : "Inactiva"}</Badge>
+                    </p>
+                  )}
+                  <RoutineCard routine={routine} onView={setViewing} showStatus={!showHistory} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </QueryState>
+
+      {viewing && <RoutineModal routine={viewing} onClose={() => setViewing(null)} />}
     </div>
   )
 }

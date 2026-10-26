@@ -16,8 +16,10 @@ import {
   Clock,
 } from "lucide-react"
 import toast from "react-hot-toast"
+import { getErrorMessage } from "@/utils/get-error-message"
 import { NotificationsPanel } from "@/components/shared/notifications-panel"
 import { UsersManagement } from "@/features/admin/users/users-management"
+import { IngresosManagement } from "@/features/admin/ingresos/ingresos-management"
 import { configService, dashboardService, plansService, type DashboardStats } from "@/services/api"
 
 interface AdminDashboardProps {
@@ -25,7 +27,7 @@ interface AdminDashboardProps {
   onLogout: () => void
 }
 
-type TabType = "home" | "usuarios" | "planes" | "soporte"
+type TabType = "home" | "usuarios" | "planes" | "ingresos" | "soporte"
 type RevenueRange = 6 | 12
 
 type PlanRecord = {
@@ -139,7 +141,7 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
       setShowCreatePlan(false)
       toast.success("Plan creado correctamente")
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo crear el plan")
+      toast.error(getErrorMessage(error, "No se pudo crear el plan"))
     }
   }
 
@@ -151,7 +153,7 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
       })
       toast.success("Datos de soporte guardados correctamente")
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudieron guardar los datos de soporte")
+      toast.error(getErrorMessage(error, "No se pudieron guardar los datos de soporte"))
     }
   }
 
@@ -188,6 +190,7 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
             { id: "home", icon: Home, label: "Dashboard" },
             { id: "usuarios", icon: Users, label: "Usuarios" },
             { id: "planes", icon: CreditCard, label: "Planes" },
+            { id: "ingresos", icon: DollarSign, label: "Ingresos" },
             { id: "soporte", icon: HelpCircle, label: "Soporte" },
           ].map((item) => (
             <button
@@ -240,9 +243,6 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
             className="relative p-2 rounded-xl bg-secondary hover:bg-secondary/80 transition-colors"
           >
             <Bell className="w-5 h-5 text-foreground" />
-            <span className="absolute -top-1 -right-1 w-5 h-5 bg-primary text-primary-foreground text-xs rounded-full flex items-center justify-center font-medium">
-              5
-            </span>
           </button>
         </div>
       </header>
@@ -339,6 +339,8 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
 
         {activeTab === "usuarios" && <UsersManagement />}
 
+        {activeTab === "ingresos" && <IngresosManagement />}
+
         {activeTab === "planes" && (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -388,7 +390,7 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
                           setPlanList((prev) => prev.map((item) => item.id === plan.id ? { ...item, activo: nextState } : item))
                           toast.success("Estado del plan actualizado")
                         } catch (error) {
-                          toast.error(error instanceof Error ? error.message : "No se pudo cambiar el estado del plan")
+                          toast.error(getErrorMessage(error, "No se pudo cambiar el estado del plan"))
                         }
                       }}
                       className="flex-1 py-2 bg-secondary text-foreground rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors"
@@ -402,7 +404,7 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
                           setPlanList((prev) => prev.filter((item) => item.id !== plan.id))
                           toast.success("Plan eliminado")
                         } catch (error) {
-                          toast.error(error instanceof Error ? error.message : "No se pudo eliminar el plan")
+                          toast.error(getErrorMessage(error, "No se pudo eliminar el plan"))
                         }
                       }}
                       className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500/20 transition-colors"
@@ -460,22 +462,6 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
               </div>
             </div>
 
-            <div className="bg-card border border-border rounded-2xl overflow-hidden">
-              <div className="p-4 border-b border-border">
-                <h2 className="font-semibold text-foreground">Horario de Atención</h2>
-              </div>
-              <div className="p-5">
-                <div className="flex items-center gap-3 p-4 bg-secondary rounded-xl">
-                  <div className="w-10 h-10 bg-yellow-500/10 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <Clock className="w-5 h-5 text-yellow-500" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Horario de Atención</p>
-                    <p className="font-medium text-foreground">Lun a Vie · 9:00 a 18:00 hs</p>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         )}
       </main>
@@ -486,6 +472,7 @@ export function AdminDashboard({ userName, onLogout }: AdminDashboardProps) {
             { id: "home", icon: Home, label: "Inicio" },
             { id: "usuarios", icon: Users, label: "Usuarios" },
             { id: "planes", icon: CreditCard, label: "Planes" },
+            { id: "ingresos", icon: DollarSign, label: "Ingresos" },
             { id: "soporte", icon: HelpCircle, label: "Soporte" },
           ].map((tab) => (
             <button

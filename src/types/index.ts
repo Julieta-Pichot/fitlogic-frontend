@@ -4,6 +4,7 @@ export type {
   ChangePasswordPayload,
   LoginPayload,
   LoginResponse,
+  LoginResult,
   SystemConfig,
   UserRole,
 } from './auth';

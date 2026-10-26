@@ -11,6 +11,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Permite abrir la app por un túnel (cloudflared / ngrok) para probar el retorno de Mercado Pago.
+    allowedHosts: ['.trycloudflare.com', '.ngrok-free.app', '.ngrok-free.dev', '.ngrok.app', '.ngrok.io', '.loca.lt'],
   },
   build: {
     outDir: 'dist',

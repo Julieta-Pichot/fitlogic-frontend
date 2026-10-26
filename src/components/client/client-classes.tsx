@@ -1,491 +1,249 @@
-import { useEffect, useState } from "react"
-import { Calendar, Clock, MapPin, Users, Star, ChevronLeft, ChevronRight, X, Check } from "lucide-react"
-import { classesService, type ClassRecord } from "@/services/classes.service"
+import { useState } from "react"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { Calendar, CalendarCheck, Clock, MapPin, Repeat, User, Users } from "lucide-react"
 import toast from "react-hot-toast"
+import { Badge } from "@/components/ui"
+import { clientService } from "@/services/client.service"
+import { getErrorMessage } from "@/utils/get-error-message"
+import { DAY_LETTERS, DAY_NAMES, formatIsoDate } from "@/utils/gym-time"
+import type { ClassListItem, MyClass } from "@/types/client"
+import { CancelClassDialog, useRefreshAfterEnrollment, type CancelTarget } from "./class-actions"
+import { EmptyBlock, ErrorBanner, QueryState } from "./client-ui"
 
-const classes = [
-  {
-    id: 1,
-    name: "Spinning Intensivo",
-    instructor: "Carlos López",
-    time: "10:00 - 11:00",
-    room: "Sala B",
-    spots: 5,
-    maxSpots: 20,
-    enrolled: true,
-    isRecurring: true,
-    rating: 4.8,
-    finished: false,
-    day: "lunes",
-  },
-  {
-    id: 2,
-    name: "Yoga Flow",
-    instructor: "Ana Martínez",
-    time: "18:00 - 19:00",
-    room: "Sala C",
-    spots: 8,
-    maxSpots: 15,
-    enrolled: false,
-    isRecurring: true,
-    rating: 4.9,
-    finished: false,
-    day: "lunes",
-  },
-  {
-    id: 3,
-    name: "Funcional HIIT",
-    instructor: "Carlos López",
-    time: "09:00 - 10:00",
-    room: "Sala A",
-    spots: 0,
-    maxSpots: 25,
-    enrolled: false,
-    isRecurring: true,
-    rating: 4.7,
-    finished: false,
-    day: "martes",
-  },
-  {
-    id: 4,
-    name: "Pilates",
-    instructor: "Laura Sánchez",
-    time: "17:00 - 18:00",
-    room: "Sala C",
-    spots: 12,
-    maxSpots: 15,
-    enrolled: true,
-    isRecurring: true,
-    rating: 4.6,
-    finished: true,
-    day: "miercoles",
-  },
-  {
-    id: 5,
-    name: "Masterclass Boxeo (Evento)",
-    instructor: "Miguel Torres",
-    time: "08:00 - 09:00",
-    room: "Sala A",
-    spots: 3,
-    maxSpots: 20,
-    enrolled: false,
-    isRecurring: false,
-    rating: null,
-    finished: false,
-    day: "jueves",
-  },
-  {
-    id: 6,
-    name: "Zumba Especial Verano",
-    instructor: "Carolina Ruiz",
-    time: "19:00 - 20:00",
-    room: "Sala B",
-    spots: 10,
-    maxSpots: 30,
-    enrolled: false,
-    isRecurring: false,
-    rating: null,
-    finished: false,
-    day: "viernes",
-  },
-]
+type View = "dia" | "mias"
 
-const mapClass = (item: ClassRecord) => {
-  const enrolled = item.inscripciones.some((entry) => entry.estadoInscripcion.nombre === "INSCRIPTO" || entry.estadoInscripcion.nombre === "ASISTIO")
-  const finished = new Date(item.fechaHora) <= new Date()
-  const enrolledCount = item.inscripciones.filter((entry) => entry.estadoInscripcion.nombre !== "CANCELADO").length
-  return {
-    id: item.id,
-    name: item.nombre,
-    instructor: `${item.profesor.usuario.nombre} ${item.profesor.usuario.apellido}`.trim(),
-    time: new Date(item.fechaHora).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }),
-    room: item.sala ?? "Sala única",
-    spots: Math.max(0, item.cupoMaximo - enrolledCount),
-    maxSpots: item.cupoMaximo,
-    enrolled,
-    isRecurring: item.recurrente,
-    rating: item.puntuaciones.length ? item.puntuaciones.reduce((sum, rating) => sum + rating.puntuacion, 0) / item.puntuaciones.length : null,
-    finished,
-    day: new Date(item.fechaHora).toLocaleDateString("es-AR", { weekday: "long" }).toLowerCase(),
-  }
+const STATUS_BADGE: Record<ClassListItem["estado"], { label: string; variant: "success" | "warning" | "danger" | "secondary" }> = {
+  DISPONIBLE: { label: "Disponible", variant: "success" },
+  COMPLETA: { label: "Completa", variant: "danger" },
+  INSCRIPTO: { label: "Ya inscripto", variant: "warning" },
+  YA_COMENZO: { label: "Ya comenzó", variant: "secondary" },
 }
 
 export function ClientClasses() {
-  const [view, setView] = useState<"available" | "enrolled">("available")
-  const [selectedClass, setSelectedClass] = useState<typeof classes[0] | null>(null)
-  const [classList, setClassList] = useState<typeof classes>([])
-  const [cancelledIds, setCancelledIds] = useState<number[]>([])
-  const [ratedClasses, setRatedClasses] = useState<Record<number, number>>({})
-  const [ratingClass, setRatingClass] = useState<typeof classes[0] | null>(null)
-  const [ratingValue, setRatingValue] = useState(0)
+  const [view, setView] = useState<View>("dia")
+  const [fecha, setFecha] = useState<string | undefined>(undefined)
+  const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const refresh = useRefreshAfterEnrollment()
 
-  useEffect(() => {
-    classesService.listAvailable().then((items) => {
-      setClassList(items.map(mapClass))
-      setRatedClasses(Object.fromEntries(items.flatMap((item) => item.puntuaciones.map((rating) => [item.id, rating.puntuacion]))))
-    }).catch(() => toast.error("No se pudieron cargar las clases"))
-  }, [])
+  const dayQuery = useQuery({ queryKey: ["client", "classes", fecha ?? "hoy"], queryFn: () => clientService.listClasses(fecha), enabled: view === "dia" })
+  const mineQuery = useQuery({ queryKey: ["client", "my-classes"], queryFn: clientService.listMyClasses })
 
-  const myClasses = classList.filter((c) => c.enrolled)
+  const enroll = useMutation({
+    mutationFn: ({ id, date }: { id: number; date: string }) => clientService.enroll(id, date),
+    onMutate: () => setActionError(null),
+    onSuccess: () => {
+      toast.success("¡Inscripción confirmada!")
+      refresh()
+    },
+    // Cupo lleno, choque de horario, cuenta inhabilitada...: se muestra el mensaje real del backend.
+    onError: (error) => {
+      const message = getErrorMessage(error, "No se pudo completar la inscripción")
+      setActionError(message)
+      refresh()
+    },
+  })
 
-  const enrollClass = async (id: number) => {
-    try {
-      await classesService.enroll(id)
-      setClassList((prev) => prev.map((item) => item.id === id ? { ...item, enrolled: true, spots: Math.max(0, item.spots - 1) } : item))
-      setSelectedClass(null)
-      toast.success("Inscripción creada correctamente")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "No se pudo realizar la inscripción")
-    }
-  }
-
-  const cancelEnrollment = (id: number) => {
-    setCancelledIds((prev) => [...prev, id])
-    setSelectedClass(null)
-  }
-
-  const submitRating = async () => {
-    if (ratingClass && ratingValue > 0) {
-      try {
-        await classesService.rate(ratingClass.id, ratingValue)
-        setRatedClasses((prev) => ({ ...prev, [ratingClass.id]: ratingValue }))
-        toast.success("Puntuación guardada")
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "No se pudo puntuar la clase")
-      }
-    }
-    setRatingClass(null)
-    setRatingValue(0)
-  }
-
-  const days = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado"]
-  const dayLabels: Record<string, string> = {
-    lunes: "Lun",
-    martes: "Mar",
-    miercoles: "Mié",
-    jueves: "Jue",
-    viernes: "Vie",
-    sabado: "Sáb",
-  }
+  const data = dayQuery.data
+  const mineCount = mineQuery.data?.length
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">Clases</h1>
-        <p className="text-muted-foreground mt-1">Inscribite a las clases disponibles</p>
+        <p className="mt-1 text-muted-foreground">Elegí un día e inscribite a las clases del gimnasio</p>
       </div>
 
-      {/* Toggle */}
-      <div className="flex gap-2 p-1 bg-secondary rounded-xl">
-        <button
-          onClick={() => setView("available")}
-          className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
-            view === "available"
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Disponibles
-        </button>
-        <button
-          onClick={() => setView("enrolled")}
-          className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
-            view === "enrolled"
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Mis Clases ({myClasses.length})
-        </button>
+      <div className="flex gap-2 rounded-xl bg-secondary p-1" role="tablist">
+        {(
+          [
+            ["dia", "Por día"],
+            ["mias", mineCount ? `Mis clases (${mineCount})` : "Mis clases"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={view === id}
+            onClick={() => {
+              setView(id)
+              setActionError(null)
+            }}
+            className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${view === id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {view === "available" ? (
+      {actionError && <ErrorBanner message={actionError} onClose={() => setActionError(null)} />}
+
+      {view === "dia" ? (
         <>
-          {/* Week Calendar */}
-          <div className="bg-card border border-border rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-4">
-              <button className="p-2 hover:bg-secondary rounded-lg transition-colors">
-                <ChevronLeft className="w-5 h-5 text-muted-foreground" />
-              </button>
-              <span className="font-semibold text-foreground">Marzo 2026</span>
-              <button className="p-2 hover:bg-secondary rounded-lg transition-colors">
-                <ChevronRight className="w-5 h-5 text-muted-foreground" />
-              </button>
-            </div>
-            <div className="grid grid-cols-6 gap-2">
-              {days.map((day, index) => (
-                <div key={day} className="text-center">
-                  <p className="text-xs text-muted-foreground mb-2">{dayLabels[day]}</p>
-                  <div
-                    className={`aspect-square rounded-xl flex items-center justify-center text-sm font-medium ${
-                      index === 0
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-secondary text-foreground hover:bg-secondary/80"
+          <div className="-mx-4 overflow-x-auto px-4">
+            <div className="flex gap-2" role="tablist" aria-label="Días">
+              {(data?.dias ?? []).map((day) => {
+                const selected = day.fecha === data?.fecha
+                return (
+                  <button
+                    key={day.fecha}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    onClick={() => setFecha(day.esHoy ? undefined : day.fecha)}
+                    className={`flex min-w-[3.5rem] flex-col items-center rounded-xl border px-3 py-2 transition-colors ${
+                      selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary/40"
                     }`}
                   >
-                    {10 + index}
-                  </div>
-                  {classList.filter((c) => c.day === day).length > 0 && (
-                    <div className="flex justify-center gap-0.5 mt-1">
-                      {classes
-                        .filter((c) => c.day === day)
-                        .slice(0, 3)
-                        .map((_, i) => (
-                          <div key={i} className="w-1 h-1 rounded-full bg-primary" />
-                        ))}
-                    </div>
-                  )}
-                </div>
-              ))}
+                    <span className="text-xs font-medium">{day.esHoy ? "Hoy" : DAY_NAMES[day.diaSemana - 1].slice(0, 3)}</span>
+                    <span className="text-lg font-bold leading-tight">{day.fecha.slice(8)}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
 
-          {/* Classes List */}
-          <div className="space-y-3">
-            {classList.map((classItem) => (
-              <div
-                key={classItem.id}
-                      onClick={() => enrollClass(classItem.id)}
-                className="bg-card border border-border rounded-2xl p-4 cursor-pointer hover:border-primary/50 transition-all"
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-foreground">{classItem.name}</h3>
-                      {classItem.enrolled && (
-                        <span className="px-2 py-0.5 bg-primary/10 text-primary text-xs rounded-full font-medium">
-                          Inscripto
+          <QueryState query={dayQuery} label="Cargando clases..." fallback="No se pudieron cargar las clases">
+            {data && data.clases.length === 0 ? (
+              <EmptyBlock icon={<Calendar className="h-7 w-7" />} title="No hay clases este día" description="Probá con otro día de la semana." />
+            ) : (
+              <ul className="space-y-3">
+                {data?.clases.map((clase) => {
+                  const badge = STATUS_BADGE[clase.estado]
+                  const pending = enroll.isPending && enroll.variables?.id === clase.id
+                  return (
+                    <li key={`${clase.id}-${clase.inicio}`} className="space-y-3 rounded-2xl border border-border bg-card p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-semibold text-foreground">{clase.nombre}</h3>
+                            {clase.recurrente && (
+                              <Badge variant="secondary" className="gap-1">
+                                <Repeat className="h-3 w-3" /> Semanal
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                            <span className="flex items-center gap-1.5">
+                              <Clock className="h-4 w-4" /> {clase.horaInicio} - {clase.horaFin} hs
+                            </span>
+                            {clase.sala && (
+                              <span className="flex items-center gap-1.5">
+                                <MapPin className="h-4 w-4" /> {clase.sala}
+                              </span>
+                            )}
+                            <span className="flex items-center gap-1.5">
+                              <User className="h-4 w-4" /> Prof. {clase.profesor}
+                            </span>
+                          </div>
+                        </div>
+                        <Badge variant={badge.variant}>{badge.label}</Badge>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                          <Users className="h-4 w-4" /> {clase.inscriptos}/{clase.cupoMaximo} lugares
                         </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-1">{classItem.instructor}</p>
-                  </div>
-                  {classItem.isRecurring && classItem.rating !== null ? (
-                    <div className="flex items-center gap-1 text-yellow-500">
-                      <Star className="w-4 h-4 fill-current" />
-                      <span className="text-sm font-medium">{classItem.rating}</span>
-                    </div>
-                  ) : (
-                    <span className="px-2 py-0.5 bg-secondary text-muted-foreground text-xs rounded-full font-medium">
-                      Nueva
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-3 mt-3">
-                  <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    <Clock className="w-4 h-4" /> {classItem.time}
-                  </span>
-                  <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    <MapPin className="w-4 h-4" /> {classItem.room}
-                  </span>
-                  <span
-                    className={`text-sm flex items-center gap-1.5 ${
-                      classItem.spots === 0 ? "text-red-500" : "text-muted-foreground"
-                    }`}
-                  >
-                    <Users className="w-4 h-4" />
-                    {classItem.spots === 0
-                      ? "Sin cupos"
-                      : `${classItem.spots}/${classItem.maxSpots} disponibles`}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+                        {clase.estado === "INSCRIPTO" ? (
+                          <button
+                            type="button"
+                            disabled={!clase.puedeDarseDeBaja}
+                            onClick={() => setCancelTarget({ id: clase.id, nombre: clase.nombre, recurrente: clase.recurrente })}
+                            className="rounded-lg bg-red-500/10 px-4 py-2 text-sm font-medium text-red-500 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Darme de baja
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={!clase.puedeInscribirse || pending}
+                            onClick={() => enroll.mutate({ id: clase.id, date: data.fecha })}
+                            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {pending ? "Inscribiendo..." : "Inscribirme"}
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </QueryState>
         </>
       ) : (
-        /* My Classes */
-        <div className="space-y-3">
-          {myClasses.length === 0 ? (
-            <div className="bg-card border border-border rounded-2xl p-8 text-center">
-              <Calendar className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-              <p className="text-foreground font-medium">No estás inscripto en ninguna clase</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Explorá las clases disponibles e inscribite
-              </p>
-            </div>
+        <QueryState query={mineQuery} label="Cargando tus clases..." fallback="No se pudieron cargar tus clases">
+          {mineQuery.data?.length === 0 ? (
+            <EmptyBlock icon={<CalendarCheck className="h-7 w-7" />} title="Todavía no estás inscripto a ninguna clase" description="Elegí un día y anotate en la que más te guste." action={
+              <button type="button" onClick={() => setView("dia")} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+                Ver clases
+              </button>
+            } />
           ) : (
-            myClasses.map((classItem) => (
-              <div
-                key={classItem.id}
-                className="bg-card border border-primary/30 rounded-2xl p-4"
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-foreground">{classItem.name}</h3>
-                      {classItem.finished && (
-                        <span className="px-2 py-0.5 bg-secondary text-muted-foreground text-xs rounded-full font-medium">
-                          Finalizada
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-1">{classItem.instructor}</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-3 mt-3">
-                  <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    <Clock className="w-4 h-4" /> {classItem.time}
-                  </span>
-                  <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    <MapPin className="w-4 h-4" /> {classItem.room}
-                  </span>
-                </div>
-
-                {/* Acciones: cancelar inscripción o puntuar si ya pasó */}
-                <div className="flex gap-2 mt-4 pt-4 border-t border-border">
-                  {classItem.finished ? (
-                    ratedClasses[classItem.id] ? (
-                      <div className="flex-1 py-2.5 bg-secondary text-foreground rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm">
-                        <Star className="w-4 h-4 text-yellow-500 fill-current" />
-                        Puntuaste con {ratedClasses[classItem.id]}
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setRatingClass(classItem)
-                          setRatingValue(0)
-                        }}
-                        className="flex-1 py-2.5 bg-primary text-primary-foreground rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm hover:bg-primary/90 transition-colors"
-                      >
-                        <Star className="w-4 h-4" />
-                        Puntuar clase
-                      </button>
-                    )
-                  ) : (
-                    <button
-                      onClick={() => setSelectedClass(null)}
-                      className="flex-1 py-2.5 bg-red-500/10 text-red-500 rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm hover:bg-red-500/20 transition-colors"
-                    >
-                      <X className="w-4 h-4" />
-                      Cancelar inscripción
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))
+            <ul className="space-y-3">
+              {mineQuery.data?.map((clase) => (
+                <MyClassCard key={clase.id} clase={clase} onCancel={() => setCancelTarget({ id: clase.id, nombre: clase.nombre, recurrente: clase.recurrente })} />
+              ))}
+            </ul>
           )}
-        </div>
+        </QueryState>
       )}
 
-      {/* Class Detail Modal */}
-      {selectedClass && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-2xl w-full max-w-md max-h-[80vh] overflow-y-auto">
-            <div className="p-5 border-b border-border flex items-center justify-between">
-              <h2 className="text-lg font-bold text-foreground">{selectedClass.name}</h2>
-              <button
-                onClick={() => setSelectedClass(null)}
-                className="p-2 hover:bg-secondary rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5 text-muted-foreground" />
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
-                  <Calendar className="w-6 h-6 text-primary" />
-                </div>
-                <div>
-                  <p className="font-medium text-foreground">{selectedClass.instructor}</p>
-                  <p className="text-sm text-muted-foreground">Instructor</p>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-secondary rounded-xl p-3">
-                  <p className="text-sm text-muted-foreground">Horario</p>
-                  <p className="font-medium text-foreground">{selectedClass.time}</p>
-                </div>
-                <div className="bg-secondary rounded-xl p-3">
-                  <p className="text-sm text-muted-foreground">Sala</p>
-                  <p className="font-medium text-foreground">{selectedClass.room}</p>
-                </div>
-                <div className="bg-secondary rounded-xl p-3">
-                  <p className="text-sm text-muted-foreground">Cupos</p>
-                  <p className="font-medium text-foreground">
-                    {selectedClass.spots}/{selectedClass.maxSpots}
-                  </p>
-                </div>
-                <div className="bg-secondary rounded-xl p-3">
-                  <p className="text-sm text-muted-foreground">Puntuación</p>
-                  <p className="font-medium text-foreground flex items-center gap-1">
-                    <Star className="w-4 h-4 text-yellow-500 fill-current" />
-                    {selectedClass.rating}
-                  </p>
-                </div>
-              </div>
-
-              {selectedClass.enrolled ? (
-                <button
-                  onClick={() => cancelEnrollment(selectedClass.id)}
-                  className="w-full py-3 bg-red-500/10 text-red-500 rounded-xl font-semibold hover:bg-red-500/20 transition-colors"
-                >
-                  Cancelar Inscripción
-                </button>
-              ) : selectedClass.spots === 0 ? (
-                <button className="w-full py-3 bg-secondary text-foreground rounded-xl font-semibold">
-                  Anotarse en Lista de Espera
-                </button>
-              ) : (
-                <button className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-semibold hover:bg-primary/90 transition-colors">
-                  Inscribirse
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Rating Modal */}
-      {ratingClass && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-2xl w-full max-w-md">
-            <div className="p-5 border-b border-border flex items-center justify-between">
-              <h2 className="text-lg font-bold text-foreground">Puntuar Clase</h2>
-              <button
-                onClick={() => setRatingClass(null)}
-                className="p-2 hover:bg-secondary rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5 text-muted-foreground" />
-              </button>
-            </div>
-            <div className="p-5 space-y-5">
-              <div className="text-center">
-                <h3 className="font-semibold text-foreground">{ratingClass.name}</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {ratingClass.instructor} • {ratingClass.time}
-                </p>
-              </div>
-
-              <div className="flex items-center justify-center gap-2">
-                {[1, 2, 3, 4, 5].map((value) => (
-                  <button
-                    key={value}
-                    onClick={() => setRatingValue(value)}
-                    aria-label={`Puntuar con ${value}`}
-                  >
-                    <Star
-                      className={`w-9 h-9 transition-colors ${
-                        value <= ratingValue ? "text-yellow-500 fill-current" : "text-muted-foreground"
-                      }`}
-                    />
-                  </button>
-                ))}
-              </div>
-
-              <button
-                onClick={submitRating}
-                disabled={ratingValue === 0}
-                className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Enviar puntuación
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CancelClassDialog target={cancelTarget} onClose={() => setCancelTarget(null)} onError={setActionError} />
     </div>
+  )
+}
+
+export function MyClassCard({ clase, onCancel }: { clase: MyClass; onCancel: () => void }) {
+  return (
+    <li className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="font-semibold text-foreground">{clase.nombre}</h3>
+          <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <Clock className="h-4 w-4" /> {clase.horaInicio} - {clase.horaFin} hs
+            </span>
+            {clase.sala && (
+              <span className="flex items-center gap-1.5">
+                <MapPin className="h-4 w-4" /> {clase.sala}
+              </span>
+            )}
+            <span className="flex items-center gap-1.5">
+              <User className="h-4 w-4" /> Prof. {clase.profesor}
+            </span>
+          </div>
+        </div>
+        <Badge variant="warning">Inscripto</Badge>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {clase.recurrente ? (
+          DAY_LETTERS.map((letter, index) => (
+            <span
+              key={letter + index}
+              title={DAY_NAMES[index]}
+              className={`flex h-6 w-6 items-center justify-center rounded-lg text-[11px] font-semibold ${clase.dias.includes(index + 1) ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground/60"}`}
+            >
+              {letter}
+            </span>
+          ))
+        ) : (
+          <Badge variant="secondary">{clase.fecha ? formatIsoDate(clase.fecha) : "Clase única"}</Badge>
+        )}
+      </div>
+
+      <div className="flex items-center justify-end">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={!clase.puedeDarseDeBaja}
+          className="rounded-lg bg-red-500/10 px-4 py-2 text-sm font-medium text-red-500 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Darme de baja
+        </button>
+      </div>
+    </li>
   )
 }

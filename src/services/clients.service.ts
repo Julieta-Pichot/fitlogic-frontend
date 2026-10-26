@@ -6,6 +6,8 @@ export type ClientApiRecord = {
   estadoClienteId: number;
   estadoCliente: { id: number; nombre: string };
   objetivoEntrenamiento: string | null;
+  // null = sin objetivo definido
+  objetivoDiasRacha: number | null;
   aptoFisicoArchivo: string | null;
   aptoFisicoFechaCarga: string | null;
   aptoFisicoFechaVencimiento: string | null;
@@ -14,6 +16,9 @@ export type ClientApiRecord = {
     fechaVencimiento: string;
     plan: { id: number; nombre: string; precio: string | number };
     estadoCuota: { nombre: string };
+    pago: { id: number } | null;
+    // Precio final a cobrar calculado por el backend (plan + promoción vigente); solo en cuotas PENDIENTE sin pago.
+    montoACobrar?: number;
   }>;
   usuario: { nombre: string; apellido: string; email: string; telefono: string | null };
 };
@@ -25,6 +30,8 @@ export type CreateClientPayload = {
   password: string;
   telefono: string;
   objetivoEntrenamiento?: string;
+  // Entero de 1 a 7 (obligatorio en el formulario de alta)
+  objetivoDiasRacha: number;
   planId: number;
 };
 
@@ -33,6 +40,7 @@ export type UpdateClientPayload = Partial<{
   apellido: string;
   telefono: string;
   objetivoEntrenamiento: string;
+  objetivoDiasRacha: number;
 }>;
 
 export const clientsService = {

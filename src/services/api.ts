@@ -164,29 +164,6 @@ export const plansService = {
   },
 };
 
-export const productsService = {
-  list: async () => {
-    const response = await api.get<ApiResponse<any[]>>('/products');
-    return response.data.data ?? [];
-  },
-  create: async (payload: { nombre: string; categoria?: string; precio: number; stock: number; descripcion?: string }) => {
-    const response = await api.post<ApiResponse>('/products', payload);
-    return response.data;
-  },
-  update: async (id: number, payload: Partial<{ nombre: string; categoria: string; precio: number; stock: number; descripcion: string; activo: 0 | 1 }>) => {
-    const response = await api.patch<ApiResponse>(`/products/${id}`, payload);
-    return response.data;
-  },
-  toggleActive: async (id: number, activo: 0 | 1) => {
-    const response = await api.patch<ApiResponse>(`/products/${id}/active`, { activo });
-    return response.data;
-  },
-  remove: async (id: number) => {
-    const response = await api.delete<ApiResponse>(`/products/${id}`);
-    return response.data;
-  },
-};
-
 export const promotionsService = {
   list: async () => {
     const response = await api.get<ApiResponse<any[]>>('/promotions');

@@ -74,22 +74,22 @@ export function LoginPage() {
       {/* Columna derecha: el formulario se centra vertical y horizontalmente dentro de SU mitad.
           min-h-dvh evita el salto de la barra del navegador en móvil; si el teclado achica la
           pantalla, la página scrollea. En móvil la columna ocupa todo el ancho (layout apilado). */}
-      <div className="relative flex min-h-dvh w-full items-center justify-center px-6 py-16 sm:px-12 lg:w-1/2 lg:px-12 lg:py-8 2xl:px-16 2xl:py-12">
+      <div className="relative flex min-h-dvh w-full flex-col items-center justify-center px-6 py-8 sm:px-12 sm:py-16 lg:w-1/2 lg:px-12 lg:py-8 2xl:px-16 2xl:py-12">
         {/* Card del formulario: superficie plana (bg-card + borde), sin blur ni sombras marcadas. */}
-        <div className="flex w-full max-w-md flex-col gap-10 rounded-3xl border border-border bg-card p-6 shadow-lg shadow-black/10 sm:max-w-lg sm:p-10 lg:p-8 xl:max-w-[38rem] xl:p-10 2xl:max-w-[41rem] 2xl:p-12">
+        <div className="flex w-full max-w-md flex-col gap-6 rounded-3xl border border-border bg-card p-5 shadow-lg sm:gap-10 shadow-black/10 sm:max-w-lg sm:p-10 lg:p-8 xl:max-w-[38rem] xl:p-10 2xl:max-w-[41rem] 2xl:p-12">
           <div className="lg:hidden flex items-center justify-center gap-3">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary">
               <Dumbbell className="h-8 w-8 text-primary-foreground" />
             </div>
-            <span className="text-4xl font-bold tracking-tight text-foreground">FitLogic</span>
+            <span className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">FitLogic</span>
           </div>
 
           <div className="text-center lg:text-left">
-            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl lg:text-3xl xl:text-4xl 2xl:text-5xl">Bienvenido de vuelta</h2>
-            <p className="mt-4 text-lg text-muted-foreground 2xl:text-xl">Ingresá tus credenciales para acceder al sistema</p>
+            <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-4xl lg:text-3xl xl:text-4xl 2xl:text-5xl">Bienvenido de vuelta</h2>
+            <p className="mt-3 text-base text-muted-foreground sm:mt-4 sm:text-lg 2xl:text-xl">Ingresá tus credenciales para acceder al sistema</p>
           </div>
 
-          <form className="space-y-7" onSubmit={handleSubmit}>
+          <form className="space-y-5 sm:space-y-7" onSubmit={handleSubmit}>
             {error && (
               <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {error}
@@ -107,7 +107,7 @@ export function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="tu@email.com"
-                  className="w-full rounded-xl border border-border bg-secondary py-5 pl-14 pr-4 text-lg text-foreground transition-all placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary xl:text-xl"
+                  className="w-full rounded-xl border border-border bg-secondary py-4 pl-14 pr-4 text-lg sm:py-5 text-foreground transition-all placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary xl:text-xl"
                 />
               </div>
             </div>
@@ -123,7 +123,7 @@ export function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full rounded-xl border border-border bg-secondary py-5 pl-14 pr-14 text-lg text-foreground transition-all placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary xl:text-xl"
+                  className="w-full rounded-xl border border-border bg-secondary py-4 pl-14 pr-14 text-lg sm:py-5 text-foreground transition-all placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary xl:text-xl"
                 />
                 <button
                   type="button"
@@ -139,7 +139,7 @@ export function LoginPage() {
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="w-full rounded-xl bg-primary py-8 text-lg font-semibold text-primary-foreground transition-all hover:bg-primary/90 xl:text-xl"
+              className="w-full rounded-xl bg-primary py-6 text-lg sm:py-8 font-semibold text-primary-foreground transition-all hover:bg-primary/90 xl:text-xl"
             >
               {isSubmitting ? 'Ingresando...' : 'Iniciar Sesión'}
             </Button>
@@ -147,7 +147,7 @@ export function LoginPage() {
         </div>
 
         {/* En móvil el panel izquierdo no existe: el copyright pasa al pie de esta columna. */}
-        <p className="absolute inset-x-4 bottom-4 text-center text-xs text-muted-foreground lg:hidden">
+        <p className="mt-6 text-center text-xs text-muted-foreground lg:hidden">
           © 2026 FitLogic. Todos los derechos reservados Diaz-Pichot.
         </p>
       </div>

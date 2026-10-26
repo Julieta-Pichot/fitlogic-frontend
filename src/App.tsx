@@ -2,9 +2,9 @@ import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { useEffect, type ReactNode } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { ConfigProvider } from '@/contexts/ConfigContext';
 import { LoginPage } from '@/components/auth/LoginPage';
 import { ClientDashboard } from '@/components/client/client-dashboard';
+import { ClientPaymentResult } from '@/components/client/client-payment-result';
 import { TrainerDashboard } from '@/components/trainer/trainer-dashboard';
 import { ReceptionistDashboard } from '@/components/receptionist/receptionist-dashboard';
 import { AdminDashboard } from '@/components/admin/admin-dashboard';
@@ -99,6 +99,22 @@ function AdminHomePage() {
   return <AdminDashboard userName={displayName} onLogout={logout} />;
 }
 
+function NotFoundPage() {
+  const { isAuthenticated } = useAuth();
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      <div className="max-w-sm text-center space-y-4">
+        <p className="text-6xl font-bold text-primary">404</p>
+        <h1 className="text-xl font-semibold text-foreground">Página no encontrada</h1>
+        <p className="text-sm text-muted-foreground">La dirección que abriste no existe o ya no está disponible.</p>
+        <a href={isAuthenticated ? '/home' : '/login'} className="inline-block rounded-xl bg-primary px-5 py-3 font-semibold text-primary-foreground hover:bg-primary/90">
+          {isAuthenticated ? 'Volver a mi panel' : 'Ir al inicio de sesión'}
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -127,6 +143,22 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/home/cliente/:tab"
+        element={
+          <ProtectedRoute allowedRoles={['cliente']}>
+            <ClienteHomePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/home/cliente/pago/resultado"
+        element={
+          <ProtectedRoute allowedRoles={['cliente']}>
+            <ClientPaymentResult />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/home/profesor"
         element={
           <ProtectedRoute allowedRoles={['profesor']}>
@@ -151,19 +183,17 @@ function AppRoutes() {
         }
       />
       <Route path="/" element={<Navigate to="/home" replace />} />
-      <Route path="*" element={<Navigate to="/home" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }
 
 export default function App() {
   return (
-    <ConfigProvider>
-      <AuthProvider>
-        <NavigateSetter />
-        <AppRoutes />
-        <Toaster position="top-right" />
-      </AuthProvider>
-    </ConfigProvider>
+    <AuthProvider>
+      <NavigateSetter />
+      <AppRoutes />
+      <Toaster position="top-right" />
+    </AuthProvider>
   );
 }

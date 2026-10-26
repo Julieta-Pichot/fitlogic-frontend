@@ -86,3 +86,37 @@ export const occursOnGymDay = (
   if (!clase.recurrente) return startKey === targetKey;
   return clase.diasSemana.includes(target.diaSemana) && targetKey >= startKey;
 };
+
+// Límites del día de HOY en Buenos Aires como instantes ISO: [inicio, inicio del día siguiente).
+export const gymTodayBounds = (now: Date = new Date()) => {
+  const { year, month, day } = getGymParts(now);
+  const next = new Date(Date.UTC(year, month - 1, day + 1));
+  return {
+    desde: toIso(year, month, day, '00:00'),
+    hasta: toIso(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), '00:00'),
+  };
+};
+
+// 'YYYY-MM-DD' (columnas DATE del backend) a 'dd/mm/yyyy', sin pasar por zonas horarias.
+export const formatIsoDate = (iso: string) => iso.split('-').reverse().join('/');
+
+// Texto de vencimiento: Vence en 12 días, Vence hoy, Vencida hace 3 días.
+export const expiryText = (days: number) => {
+  if (days === 0) return 'Vence hoy';
+  if (days === 1) return 'Vence mañana';
+  if (days > 1) return `Vence en ${days} días`;
+  return days === -1 ? 'Vencida ayer' : `Vencida hace ${Math.abs(days)} días`;
+};
+
+export const formatMoney = (value: number) =>
+  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
+
+// Tiempo restante hasta una clase: en 45 min, en 2 h 15 min, en 3 días.
+export const formatRemaining = (minutes: number) => {
+  if (minutes < 1) return 'ahora';
+  if (minutes < 60) return `en ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `en ${hours} h${minutes % 60 ? ` ${minutes % 60} min` : ''}`;
+  const days = Math.floor(hours / 24);
+  return `en ${days} ${days === 1 ? 'día' : 'días'}`;
+};
