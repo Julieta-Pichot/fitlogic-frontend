@@ -18,6 +18,11 @@ export const buildBaseURL = () => {
     return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
   }
 
+  // Sin fallback silencioso a localhost en producción: una app publicada apuntando a localhost fallaría sin explicación.
+  if (import.meta.env.PROD) {
+    throw new Error('Falta VITE_API_URL: definila en las variables de entorno del build (ej.: https://tu-api.onrender.com).');
+  }
+
   return 'http://localhost:3001/api';
 };
 
