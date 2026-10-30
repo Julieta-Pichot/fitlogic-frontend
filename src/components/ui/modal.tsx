@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { cn } from '@/utils/cn';
 import { Button } from './button';
 
@@ -14,6 +14,16 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, description, children, footer, className }: ModalProps) {
+  // Accesibilidad: ESC cierra el modal (el clic en el fondo ya lo hacía).
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (

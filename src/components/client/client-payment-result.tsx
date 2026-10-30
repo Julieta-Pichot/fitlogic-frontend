@@ -10,9 +10,9 @@ import { ReceiptButton } from "./receipt-button"
 const VIEW = {
   APROBADO: { icon: CheckCircle2, color: "text-green-500", bg: "bg-green-500/10", title: "¡Pago aprobado!", text: "Tu membresía ya está activa. ¡A entrenar!" },
   PENDIENTE: { icon: Clock, color: "text-yellow-500", bg: "bg-yellow-500/10", title: "Tu pago está pendiente de acreditación", text: "Mercado Pago todavía está procesando tu pago. Apenas se acredite, tu membresía se activa automáticamente, aunque no vuelvas a esta pantalla." },
-  RECHAZADO: { icon: XCircle, color: "text-red-500", bg: "bg-red-500/10", title: "El pago no se completó", text: "No se realizó ningún cobro y tu membresía no cambió." },
+  RECHAZADO: { icon: XCircle, color: "text-red-500", bg: "bg-red-500/10", title: "El pago no se completó", text: "No se realizó ningún cobro y tu membresía no cambió. Podés intentar de nuevo." },
   REVERTIDO: { icon: XCircle, color: "text-red-500", bg: "bg-red-500/10", title: "El pago fue devuelto", text: "Mercado Pago informa que este pago fue reembolsado o contracargado." },
-  SIN_PAGO: { icon: AlertTriangle, color: "text-muted-foreground", bg: "bg-secondary", title: "No encontramos un pago para esta compra todavía", text: "Si ya pagaste, esperá unos minutos y volvé a verificar. Si no pagaste, podés descartar la solicitud desde el Inicio." },
+  SIN_PAGO: { icon: AlertTriangle, color: "text-muted-foreground", bg: "bg-secondary", title: "No encontramos un pago para esta compra todavía", text: "Si ya pagaste, esperá unos minutos y volvé a verificar. Si todavía no pagaste, podés hacerlo desde el Inicio con el botón «Pagar»." },
 } satisfies Record<PaymentVerification["estado"], { icon: typeof Clock; color: string; bg: string; title: string; text: string }>
 
 function Receipt({ receipt }: { receipt: PaymentReceipt }) {

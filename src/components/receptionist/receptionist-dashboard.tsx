@@ -23,10 +23,12 @@ import toast from "react-hot-toast"
 import { NotificationsPanel } from "@/components/shared/notifications-panel"
 import { ChangePasswordCard } from "@/components/shared/change-password-card"
 import { ClientSelect } from "@/components/receptionist/client-select"
+import { PendingPaymentsModal } from "@/components/receptionist/pending-payments-modal"
 import { clientsService, type ClientApiRecord } from "@/services/clients.service"
 import { attendanceService } from "@/services/attendance.service"
 import {
   recepcionService,
+  type PendingPayment,
   type ReceptionPayment,
   type ReceptionPlan,
   type ReceptionStats,
@@ -37,6 +39,7 @@ import { getErrorMessage } from "@/utils/get-error-message"
 import { formatGymDate, formatGymTime, gymTodayBounds } from "@/utils/gym-time"
 import { isValidPhone, PHONE_MESSAGE } from "@/utils/phone"
 import type { ApiFieldError } from "@/types"
+import type { MembershipStatus } from "@/types/client"
 
 interface ReceptionistDashboardProps {
   userName: string
@@ -66,12 +69,34 @@ type ClientRecord = {
   pendingQuota: { id: number; planName: string; price: number } | null
   // Todas las cuotas pendientes sin pago (puede haber varias por reintentos).
   pendingQuotas: Array<{ id: number; planName: string; price: number }>
+  // Estado de la membresía calculado por el backend (misma regla que ve el cliente y que valida el cobro).
+  membership: { estado: MembershipStatus; diasRestantes: number | null; puedeRegistrarPago: boolean; motivo: string | null }
   aptoFisico: AptoStatus
   aptoLoadedAt: string
   aptoExpires: string
 }
 
 type PaymentMethod = { id: number; nombre: string }
+
+const MEMBERSHIP_LABEL: Record<MembershipStatus, string> = {
+  activa: "Activa",
+  por_vencer: "Por vencer",
+  vencida: "Vencida",
+  pendiente_pago: "Pago pendiente",
+  sin_plan: "Sin plan",
+}
+
+const membershipTone = (status: MembershipStatus) =>
+  status === "activa" ? "text-green-500" : status === "vencida" || status === "sin_plan" ? "text-red-500" : "text-yellow-500"
+
+// "Activa · faltan 20 días", "Vencida · hace 3 días": solo informa el estado y los días; la regla la aplica el backend.
+const membershipSummary = (membership: ClientRecord["membership"]) => {
+  const { estado, diasRestantes } = membership
+  if (diasRestantes === null || estado === "pendiente_pago" || estado === "sin_plan") return MEMBERSHIP_LABEL[estado]
+  if (diasRestantes < 0) return `${MEMBERSHIP_LABEL[estado]} · hace ${Math.abs(diasRestantes)} ${diasRestantes === -1 ? "día" : "días"}`
+  if (diasRestantes === 0) return `${MEMBERSHIP_LABEL[estado]} · vence hoy`
+  return `${MEMBERSHIP_LABEL[estado]} · faltan ${diasRestantes} ${diasRestantes === 1 ? "día" : "días"}`
+}
 
 const initialClients: ClientRecord[] = []
 
@@ -127,6 +152,12 @@ const mapClient = (client: ClientApiRecord): ClientRecord => {
     pendingQuota: pendingQuota
       ? { id: pendingQuota.id, planName: pendingQuota.plan.nombre, price: pendingQuota.montoACobrar ?? Number(pendingQuota.plan.precio) }
       : null,
+    membership: {
+      estado: client.membresia?.estadoMembresia ?? "sin_plan",
+      diasRestantes: client.membresia?.diasRestantes ?? null,
+      puedeRegistrarPago: client.membresia?.renovacion.permitida ?? true,
+      motivo: client.membresia?.renovacion.mensajeRecepcion ?? null,
+    },
     aptoFisico: getAptoStatus(client.aptoFisicoFechaVencimiento),
     aptoLoadedAt: formatDateOnly(client.aptoFisicoFechaCarga),
     aptoExpires: formatDateOnly(client.aptoFisicoFechaVencimiento),
@@ -307,6 +338,9 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
   })
   const [paymentError, setPaymentError] = useState("")
   const [registeringPayment, setRegisteringPayment] = useState(false)
+  // Candado síncrono contra el doble clic: el estado de React tarda un render en reflejarse.
+  const paymentInFlight = useRef(false)
+  const [showPendingPayments, setShowPendingPayments] = useState(false)
   const paymentClient = clientList.find((client) => client.id === paymentForm.clientId) ?? null
   // Opciones de cobro: primero las cuotas pendientes del cliente, después los planes activos.
   const paymentOptions = [
@@ -340,13 +374,23 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
     setPaymentForm((prev) => ({ ...prev, clientId, target: client?.pendingQuotas[0] ? `c:${client.pendingQuotas[0].id}` : "" }))
   }
 
+  // Desde el modal de pagos pendientes: va al registro de pago con el cliente y su cuota pendiente ya elegidos.
+  const startPendingPayment = (payment: PendingPayment) => {
+    setShowPendingPayments(false)
+    setActiveTab("pagos")
+    setPaymentError("")
+    setPaymentForm((prev) => ({ ...prev, clientId: payment.clienteId, target: `c:${payment.cuotaId}` }))
+  }
+
   const handleRegisterPayment = async () => {
-    if (registeringPayment) return
+    if (registeringPayment || paymentInFlight.current) return
     if (!paymentClient) return setPaymentError("Seleccioná un cliente")
+    if (!paymentClient.membership.puedeRegistrarPago) return setPaymentError(paymentClient.membership.motivo ?? "No se puede registrar un pago para este cliente ahora")
     if (!paymentChoice) return setPaymentError("Elegí la cuota pendiente o el plan a cobrar")
     if (!paymentMethodId) return setPaymentError("Seleccioná un método de pago")
 
     setPaymentError("")
+    paymentInFlight.current = true
     setRegisteringPayment(true)
     try {
       const [kind, id] = paymentTarget.split(":")
@@ -360,7 +404,10 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
       await Promise.all([loadClients(), loadPayments(), loadStats()])
     } catch (error) {
       setPaymentError(getErrorMessage(error, "No se pudo registrar el pago"))
+      // Si el backend lo rechazó por el estado de la membresía, la pantalla se pone al día.
+      void Promise.all([loadClients(), loadStats()])
     } finally {
+      paymentInFlight.current = false
       setRegisteringPayment(false)
     }
   }
@@ -737,14 +784,19 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                 <p className="text-sm text-muted-foreground">Clientes Inactivos</p>
                 <p className="text-xs text-muted-foreground mt-1">Inhabilitados por pago o baja</p>
               </div>
-              <div className="bg-card border border-border rounded-2xl p-4">
+              <button
+                type="button"
+                onClick={() => setShowPendingPayments(true)}
+                aria-label="Ver clientes con pagos pendientes"
+                className="bg-card border border-border rounded-2xl p-4 text-left transition-colors hover:border-yellow-500/50 focus:outline-none focus:ring-2 focus:ring-primary"
+              >
                 <div className="w-10 h-10 bg-yellow-500/10 rounded-xl flex items-center justify-center mb-3">
                   <AlertTriangle className="w-5 h-5 text-yellow-500" />
                 </div>
                 <p className="text-2xl font-bold text-foreground">{stats?.pagosPendientes ?? "—"}</p>
                 <p className="text-sm text-muted-foreground">Pagos Pendientes</p>
-                <p className="text-xs text-muted-foreground mt-1">Cuotas sin confirmar</p>
-              </div>
+                <p className="text-xs text-muted-foreground mt-1">Cuotas sin confirmar · ver lista</p>
+              </button>
               <div className="bg-card border border-border rounded-2xl p-4">
                 <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center mb-3">
                   <ClipboardCheck className="w-5 h-5 text-primary" />
@@ -864,8 +916,8 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                     <span className="text-sm text-muted-foreground">
                       Plan: <span className="text-foreground font-medium">{client.plan}</span>
                     </span>
-                    <span className={`text-sm ${client.cuota === "Activa" ? "text-green-500" : client.cuota === "Vencida" ? "text-red-500" : "text-yellow-500"}`}>
-                      Cuota: {client.cuota}
+                    <span className={`text-sm ${membershipTone(client.membership.estado)}`}>
+                      Membresía: {membershipSummary(client.membership)}
                     </span>
                     <span className={`text-sm ${client.aptoFisico === "Vigente" ? "text-green-500" : client.aptoFisico === "Vencido" ? "text-red-500" : "text-yellow-500"}`}>
                       Apto: {client.aptoFisico}
@@ -894,10 +946,15 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                 <p className="text-sm text-muted-foreground">Ingresos del Mes</p>
                 <p className="text-2xl font-bold text-green-500 mt-1">{stats ? formatPrice(stats.ingresosDelMes) : "—"}</p>
               </div>
-              <div className="bg-card border border-border rounded-2xl p-4">
+              <button
+                type="button"
+                onClick={() => setShowPendingPayments(true)}
+                aria-label="Ver clientes con pagos pendientes"
+                className="bg-card border border-border rounded-2xl p-4 text-left transition-colors hover:border-yellow-500/50 focus:outline-none focus:ring-2 focus:ring-primary"
+              >
                 <p className="text-sm text-muted-foreground">Pagos Pendientes</p>
                 <p className="text-2xl font-bold text-yellow-500 mt-1">{stats?.pagosPendientes ?? "—"}</p>
-              </div>
+              </button>
               <div className="bg-card border border-border rounded-2xl p-4">
                 <p className="text-sm text-muted-foreground">Asistencias Hoy</p>
                 <p className="text-2xl font-bold text-foreground mt-1">{stats?.asistenciasHoy ?? "—"}</p>
@@ -959,6 +1016,18 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
                 </div>
               </div>
 
+              {paymentClient && (
+                <p className="mt-3 text-sm text-muted-foreground" aria-live="polite">
+                  Membresía de {paymentClient.name}:{" "}
+                  <span className={`font-medium ${membershipTone(paymentClient.membership.estado)}`}>{membershipSummary(paymentClient.membership)}</span>
+                </p>
+              )}
+              {paymentClient && !paymentClient.membership.puedeRegistrarPago && paymentClient.membership.motivo && (
+                <p role="alert" className="mt-2 flex items-start gap-1.5 text-sm text-yellow-500">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  {paymentClient.membership.motivo}
+                </p>
+              )}
               {paymentClient && paymentChoice && (
                 <p className="mt-3 text-sm text-muted-foreground" aria-live="polite">
                   Monto a cobrar: <span className="text-foreground text-lg font-semibold">{formatPrice(paymentChoice.price)}</span>
@@ -977,7 +1046,7 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
 
               <button
                 onClick={handleRegisterPayment}
-                disabled={registeringPayment}
+                disabled={registeringPayment || Boolean(paymentClient && !paymentClient.membership.puedeRegistrarPago)}
                 className="mt-4 px-4 py-3 bg-primary text-primary-foreground rounded-xl font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <DollarSign className="w-5 h-5" />
@@ -1214,6 +1283,8 @@ export function ReceptionistDashboard({ userName, onLogout }: ReceptionistDashbo
 
       {/* Modals */}
       <NotificationsPanel isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
+
+      <PendingPaymentsModal open={showPendingPayments} onClose={() => setShowPendingPayments(false)} onRegister={startPendingPayment} />
 
       {/* New Client Modal */}
       {showNewClient && (

@@ -57,8 +57,6 @@ export const clientService = {
   verifyPayment: async (params: Record<string, string>) =>
     unwrap<PaymentVerification>(await api.get('/cliente/membresia/pago/verificar', { params, timeout: 30000 })),
 
-  // Descarta una solicitud de pago que nunca se pagó (si Mercado Pago ya la aprobó, la activa).
-  discardRequest: async (id: number) => unwrap<PaymentVerification & { estado: string }>(await api.delete(`/cliente/membresia/solicitudes/${id}`, { timeout: 30000 })),
   getProfile: async () => unwrap<ClientProfileData>(await api.get('/cliente/perfil')),
   changePassword: async (payload: { currentPassword: string; newPassword: string }) => {
     const response = await api.put<ApiResponse>('/cliente/perfil/password', payload);

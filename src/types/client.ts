@@ -20,12 +20,30 @@ export interface PlanInfo {
   duracionDias: number;
 }
 
+// Estado único de la membresía, calculado por el backend (el front no recalcula fechas ni reglas).
+export type MembershipStatus = 'sin_plan' | 'pendiente_pago' | 'activa' | 'por_vencer' | 'vencida';
+
 export interface Membership {
+  // Estado histórico (ACTIVA | VENCIDA | SIN_MEMBRESIA): se conserva por compatibilidad; la pantalla usa `estadoMembresia`.
   estado: 'ACTIVA' | 'VENCIDA' | 'SIN_MEMBRESIA';
+  estadoMembresia: MembershipStatus;
+  diasRestantes: number | null;
   cuota: { id: number; plan: PlanInfo; fechaInicio: string; fechaVencimiento: string; diasRestantes: number; progreso: number } | null;
   solicitudPendiente: boolean;
   // Solicitudes de pago sin pago: se pueden verificar o descartar.
   solicitudesPendientes: Array<{ id: number; plan: string }>;
+  // Plan elegido sin pago confirmado. `origen` dice dónde se paga: en recepción o en línea (Mercado Pago).
+  pendiente: { cuotaId: number; plan: PlanInfo; monto: number; desde: string; diasEspera: number; origen: 'RECEPCION' | 'MERCADOPAGO' } | null;
+  // "Ya pagué, verificar" solo tiene sentido si alguna solicitud nació de un pago en línea.
+  puedeVerificarPago: boolean;
+  renovacion: {
+    permitida: boolean;
+    fechaVencimiento: string | null;
+    renovableDesde: string | null;
+    diasParaRenovar: number;
+    mensajeCliente: string | null;
+    mensajeRecepcion: string | null;
+  };
 }
 
 export interface ClientRoutineExercise {

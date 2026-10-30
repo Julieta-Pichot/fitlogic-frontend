@@ -1,5 +1,6 @@
 import { api } from '@/services/api';
 import type { ApiResponse, AuthUser } from '@/types';
+import type { MembershipStatus } from '@/types/client';
 
 export type ReceptionStats = {
   clientesActivos: number;
@@ -29,6 +30,25 @@ export type ReceptionPlan = {
   promocion: { id: number; nombre: string; descuento: number } | null;
 };
 
+// Cliente con un plan elegido sin pago confirmado. La tarjeta "Pagos Pendientes" y esta lista salen de la MISMA consulta del backend.
+export type PendingPayment = {
+  clienteId: number;
+  cuotaId: number;
+  nombre: string;
+  email: string;
+  telefono: string | null;
+  estadoCliente: string;
+  plan: string;
+  monto: number;
+  // 'YYYY-MM-DD': día desde el que está pendiente.
+  pendienteDesde: string;
+  diasEspera: number;
+  estadoMembresia: MembershipStatus;
+  diasRestantes: number | null;
+  puedeRegistrarPago: boolean;
+  motivoBloqueo: string | null;
+};
+
 export type UpdateProfilePayload = Partial<{
   nombre: string;
   apellido: string;
@@ -44,6 +64,10 @@ export const recepcionService = {
   listPayments: async (limit = 10) => {
     const response = await api.get<ApiResponse<ReceptionPayment[]>>('/recepcion/pagos', { params: { limit } });
     return response.data.data ?? [];
+  },
+  listPendingPayments: async () => {
+    const response = await api.get<ApiResponse<{ total: number; items: PendingPayment[] }>>('/recepcion/pagos-pendientes');
+    return response.data.data ?? { total: 0, items: [] };
   },
   listPlans: async () => {
     const response = await api.get<ApiResponse<ReceptionPlan[]>>('/recepcion/planes');

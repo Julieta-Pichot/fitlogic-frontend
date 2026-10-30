@@ -1,4 +1,5 @@
 import { api } from '@/services/api';
+import type { MembershipStatus } from '@/types/client';
 
 export type ClientApiRecord = {
   id: number;
@@ -21,6 +22,13 @@ export type ClientApiRecord = {
     montoACobrar?: number;
   }>;
   usuario: { nombre: string; apellido: string; email: string; telefono: string | null };
+  // Estado de la membresía calculado por el backend (misma función que usa el panel del cliente).
+  membresia?: {
+    estadoMembresia: MembershipStatus;
+    diasRestantes: number | null;
+    pendiente: { cuotaId: number } | null;
+    renovacion: { permitida: boolean; mensajeRecepcion: string | null };
+  };
 };
 
 export type CreateClientPayload = {
