@@ -177,7 +177,7 @@ export function UsersManagement() {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Buscar usuario..."
+          placeholder="Buscar usuario por nombre, mail, numero..."
           className="flex-1"
         />
         <SelectFilter
