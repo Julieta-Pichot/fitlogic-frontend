@@ -34,7 +34,14 @@ export const usersService = {
     const response = await api.patch<ApiResponse<UserRecord>>(`/users/${id}/active`, { activo });
     return response.data;
   },
-
+  exportCsv: async (params: Pick<UserListParams, 'search' | 'rolId'>) => {
+    const response = await api.get('/users/exportar.csv', {
+      params,
+      responseType: 'blob',
+      timeout: 60000,
+    });
+    return response.data as Blob;
+  },
   resetPassword: async (id: number, newPassword: string) => {
     const response = await api.post<ApiResponse>(`/users/${id}/reset-password`, { newPassword });
     return response.data;

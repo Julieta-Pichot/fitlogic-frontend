@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Edit, Plus, Trash2, UserCog, Users } from 'lucide-react';
+import { Download, Edit, Loader2, Plus, Trash2, UserCog, Users } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
@@ -54,6 +54,7 @@ export function UsersManagement() {
   const [toggleTarget, setToggleTarget] = useState<UserRecord | null>(null);
   const [createForm, setCreateForm] = useState<CreateUserPayload>(emptyCreateForm);
   const [editForm, setEditForm] = useState<UpdateUserPayload>({});
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     resetPage();
@@ -152,7 +153,27 @@ export function UsersManagement() {
       },
     });
   };
-
+  const handleExportCsv = async () => {
+    setExporting(true);
+    try {
+      const blob = await usersService.exportCsv({
+        search: debouncedSearch || undefined,
+        rolId: roleFilter === 'all' ? undefined : Number(roleFilter),
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'usuarios.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'No se pudo exportar el CSV'));
+    } finally {
+      setExporting(false);
+    }
+  };
   const users = usersQuery.data?.items ?? [];
   const pagination = usersQuery.data?.pagination;
 
@@ -163,16 +184,26 @@ export function UsersManagement() {
           <h1 className="text-2xl font-bold text-foreground">Usuarios</h1>
           <p className="mt-1 text-muted-foreground">Gestiona todos los usuarios del gimnasio</p>
         </div>
-        <Button
-          type="button"
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="h-5 w-5" />
-          Nuevo Usuario
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={exporting}
+            className="flex items-center gap-2 bg-secondary px-4 py-2 text-foreground hover:bg-secondary/80"
+          >
+            {exporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}
+            Exportar CSV
+          </Button>
+          <Button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-5 w-5" />
+            Nuevo Usuario
+          </Button>
+        </div>
       </div>
-
       <div className="flex flex-col gap-3 sm:flex-row">
         <SearchInput
           value={search}
